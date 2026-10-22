@@ -88,7 +88,7 @@ BalatroLLM/
 
 ```bash
 # Clone the repository
-git clone https://github.com/YOUR_USERNAME/BalatroLLM.git
+git clone https://github.com/MARAN1GHTON/BalatroLLM.git
 cd BalatroLLM
 
 # Create a virtual environment
