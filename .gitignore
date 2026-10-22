@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Environment and sensitive keys
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# Balatro APK binaries and intermediate unpack directories
+*.apk
+*.idsig
+balatro_unpacked/
+balatrollm_workdir/
+tools/*.jar
+
+# Local run logs, interviews, and leaderboard databases
+runs/*
+!runs/.gitkeep
+
+# IDEs and OS
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+.DS_Store
+Thumbs.db
