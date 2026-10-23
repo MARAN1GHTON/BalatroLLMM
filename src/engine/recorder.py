@@ -340,8 +340,9 @@ class BalatroRunRecorder:
         self.peak_bank = max(self.peak_bank, state.dollars)
 
         # Format current cards & jokers
+        from .serializer import get_joker_role, clean_joker_desc
         jokers_summary = [
-            f"{j.label} ({j.rarity}{', ' + j.effect_type if j.effect_type else ''}){': ' + j.effect_desc if j.effect_desc else ''}"
+            f"{j.label} ({j.rarity}, {get_joker_role(j)}): {clean_joker_desc(key=j.key, label=j.label, raw_desc=j.effect_desc, effect_type=get_joker_role(j), x_mult=getattr(j, 'x_mult', 1.0), mult=getattr(j, 'mult', 0), chips=getattr(j, 'chips', 0))}"
             for j in state.jokers
         ]
         hand_summary = []

@@ -283,6 +283,76 @@ class TestEngineerImprovements(unittest.TestCase):
         self.assertEqual(res.score, 32 * 9)
         self.assertTrue(any("Poly" in b for b in res.breakdown))
 
+    def test_utility_econ_and_hybrid_joker_roles(self):
+        from src.engine.serializer import get_joker_role, format_joker_compact
+
+        j_splash = JokerModel(id="j1", key="j_splash", label="Splash", effect_type="mult")
+        j_luchador = JokerModel(id="j2", key="j_luchador", label="Luchador", effect_type="mult")
+        j_todo = JokerModel(id="j3", key="j_todo_list", label="To Do List", effect_type="mult")
+        j_scholar = JokerModel(id="j4", key="j_scholar", label="Scholar", effect_type="mult")
+        j_runner = JokerModel(id="j5", key="j_runner", label="Runner", effect_type="mult", chips=0)
+        j_photo = JokerModel(id="j6", key="j_photograph", label="Photograph", effect_type="mult")
+
+        self.assertEqual(get_joker_role(j_splash), "utility")
+        self.assertEqual(get_joker_role(j_luchador), "utility")
+        self.assertEqual(get_joker_role(j_todo), "econ")
+        self.assertEqual(get_joker_role(j_scholar), "hybrid")
+        self.assertEqual(get_joker_role(j_runner), "chips")
+        self.assertEqual(get_joker_role(j_photo), "x_mult")
+
+        self.assertIn("[*Util]", format_joker_compact(0, j_splash))
+        self.assertIn("[$Econ]", format_joker_compact(1, j_todo))
+        self.assertIn("[+Chips/+FlatMult]", format_joker_compact(2, j_scholar))
+        self.assertIn("[xMultiMult]", format_joker_compact(3, j_photo))
+
+        # Mercury build: Splash + Luchador + Scholar must NOT trigger false CHIP-STARVED ALERT
+        state_mercury = GameState(ante=3, jokers=[j_splash, j_luchador, j_scholar])
+        warnings = check_build_balance(state_mercury)
+        self.assertEqual(warnings, [])
+
+    def test_chip_starved_excludes_celestial_packs(self):
+        from src.engine.serializer import get_shop_recommendations_for_balance
+        from src.bridge.schema import ShopModel
+
+        j1 = JokerModel(id="j1", key="j_droll", label="Droll Joker", effect_type="mult", mult=10)
+        j2 = JokerModel(id="j2", key="j_jolly", label="Jolly Joker", effect_type="mult", mult=8)
+        shop_items = [
+            ShopItemModel(index=1, id="p_celestial", label="Celestial Pack", item_type="Booster", cost=4, desc="Planets"),
+            ShopItemModel(index=2, id="c_jupiter", label="Jupiter", item_type="Planet", cost=3, desc="Flush"),
+            ShopItemModel(index=3, id="j_blue", label="Blue Joker", item_type="Joker", cost=5, desc="+2 Chips per card"),
+        ]
+        state = GameState(
+            stage="SHOP",
+            ante=3,
+            dollars=10,
+            jokers=[j1, j2],
+            shop=ShopModel(items=shop_items, reroll_cost=5),
+        )
+        recs_str = "\n".join(get_shop_recommendations_for_balance(state))
+        self.assertIn("CHIP-STARVED SHOP ALERT", recs_str)
+        self.assertIn("Blue Joker", recs_str)
+        self.assertNotIn("Celestial Pack", recs_str)
+        self.assertNotIn("Jupiter", recs_str)
+
+    def test_bank_aware_voucher_and_concise_booster(self):
+        from src.engine.serializer import project_booster_impact
+        from src.engine.scoring import BalatroScoringEngine
+
+        v_blank = find_voucher_data("v_blank")
+        res_low_bank = format_voucher_impact(v_blank, cost=10, bank=12)
+        self.assertIn("SKIP FOR NOW (Bank < $25)", res_low_bank)
+
+        res_high_bank = format_voucher_impact(v_blank, cost=10, bank=30)
+        self.assertIn("VERY HIGH (GATEWAY)", res_high_bank)
+
+        pack = ShopItemModel(index=1, id="p_cel", label="Celestial Pack", item_type="Booster", cost=4, desc="Planets")
+        state = GameState(stage="SHOP", dollars=11)
+        impact = project_booster_impact(pack, state, "Flush", BalatroScoringEngine())
+        self.assertIsNotNone(impact)
+        self.assertNotIn("MANDATORY", impact)
+        self.assertIn("does NOT replace a +Chips or xMult Joker", impact)
+        self.assertIn("Costs -$1/rnd interest: bank $11 → $7", impact)
+
 
 if __name__ == "__main__":
     unittest.main()

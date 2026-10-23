@@ -505,12 +505,60 @@ function BalatroBridge.get_game_state()
         for i, j in ipairs(G.jokers.cards) do
             if is_card_valid(j) then
                 local effect_type = "mult"
-                if j.ability then
-                    if j.ability.x_mult and j.ability.x_mult > 1.0 then
+                local j_key = (j.config and j.config.center and j.config.center.key) or ""
+                local util_keys = {
+                    j_splash=true, j_luchador=true, j_shortcut=true, j_four_fingers=true,
+                    j_pareidolia=true, j_smeared=true, j_oops=true, j_hanging_chad=true,
+                    j_sock_and_buskin=true, j_hack=true, j_dusk=true, j_mime=true,
+                    j_selzer=true, j_juggler=true, j_drunkard=true, j_troubadour=true,
+                    j_turtle_bean=true, j_merry_andy=true, j_burglar=true, j_dna=true,
+                    j_sixth_sense=true, j_seance=true, j_superposition=true, j_vagabond=true,
+                    j_8_ball=true, j_cartomancer=true, j_astronomer=true, j_burnt=true,
+                    j_space=true, j_marble=true, j_certificate=true, j_hallucination=true,
+                    j_chaos=true, j_mr_bones=true, j_invisible=true, j_ring_master=true,
+                    j_blueprint=true, j_brainstorm=true, j_chicot=true, j_perkeo=true,
+                    j_diet_cola=true
+                }
+                local econ_keys = {
+                    j_todo_list=true, j_faceless=true, j_business=true, j_mail=true,
+                    j_golden=true, j_cloud_9=true, j_rocket=true, j_delayed_grat=true,
+                    j_egg=true, j_gift=true, j_reserved_parking=true, j_to_the_moon=true,
+                    j_midas_mask=true, j_trading=true, j_ticket=true, j_matador=true,
+                    j_satellite=true, j_rough_gem=true, j_credit_card=true
+                }
+                local chip_keys = {
+                    j_runner=true, j_ice_cream=true, j_blue_joker=true, j_banner=true,
+                    j_scary_face=true, j_odd_todd=true, j_sly=true, j_wily=true,
+                    j_clever=true, j_devious=true, j_crafty=true, j_hiker=true,
+                    j_bull=true, j_stone=true, j_arrowhead=true, j_wee=true,
+                    j_castle=true, j_square=true, j_stuntman=true
+                }
+                local xmult_keys = {
+                    j_photograph=true, j_bloodstone=true, j_loyalty_card=true,
+                    j_steel_joker=true, j_stencil=true, j_ramen=true, j_baseball=true,
+                    j_flower_pot=true, j_blackboard=true, j_cavendish=true,
+                    j_card_sharp=true, j_constellation=true, j_duo=true, j_trio=true,
+                    j_family=true, j_order=true, j_tribe=true, j_baron=true,
+                    j_obelisk=true, j_vampire=true, j_madness=true, j_drivers_license=true,
+                    j_caino=true, j_triboulet=true, j_yorick=true, j_idol=true,
+                    j_ancient=true, j_hologram=true, j_seeing_double=true,
+                    j_hit_the_road=true, j_glass=true, j_lucky_cat=true,
+                    j_campfire=true, j_throwback=true, j_acrobat=true
+                }
+                if util_keys[j_key] then
+                    effect_type = "utility"
+                elseif econ_keys[j_key] then
+                    effect_type = "econ"
+                elseif xmult_keys[j_key] then
+                    effect_type = "x_mult"
+                elseif chip_keys[j_key] then
+                    effect_type = "chips"
+                elseif j.ability then
+                    if (j.ability.x_mult and j.ability.x_mult > 1.0) or (j.ability.Xmult and j.ability.Xmult > 1.0) then
                         effect_type = "x_mult"
-                    elseif j.ability.chips and j.ability.chips > 0 then
+                    elseif (j.ability.chips and j.ability.chips > 0) or (j.ability.t_chips and j.ability.t_chips > 0) or (type(j.ability.extra) == "table" and j.ability.extra.chips and not j.ability.extra.mult) then
                         effect_type = "chips"
-                    elseif j.ability.dollars or j.ability.extra_dollars then
+                    elseif j.ability.dollars or j.ability.extra_dollars or (type(j.ability.extra) == "table" and j.ability.extra.dollars) then
                         effect_type = "econ"
                     end
                 end

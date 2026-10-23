@@ -168,8 +168,8 @@ class LorebookEngine:
     def match_state(
         self,
         state: GameState,
-        max_entries: int = 3,
-        max_chars: int = 2400,
+        max_entries: int = 2,
+        max_chars: int = 1500,
     ) -> list[LorebookEntry]:
         """Matches entries against the live GameState and returns top relevant entries."""
         if not self._loaded:
@@ -216,17 +216,30 @@ class LorebookEngine:
             if c.id:
                 text_blobs.append(c.id.lower())
 
-        # Shop Items
+        # Shop Items (skip Tier 1 Vouchers since vouchers.py already renders inline VOUCHER ANALYSIS)
+        tier1_voucher_names = {
+            "blank", "v_blank", "overstock", "v_overstock_norm", "seed money", "v_seed_money",
+            "reroll surplus", "v_reroll_surplus", "crystal ball", "v_crystal_ball",
+            "telescope", "v_telescope", "grabber", "v_grabber", "wasteful", "v_wasteful",
+            "tarot merchant", "v_tarot_merchant", "planet merchant", "v_planet_merchant",
+            "magic trick", "v_magic_trick", "hone", "v_hone", "clearance sale", "v_clearance_sale",
+            "hieroglyph", "v_hieroglyph", "director's cut", "v_directors_cut", "paint brush", "v_paint_brush",
+        }
         if state.stage == "SHOP" and state.shop and state.shop.items:
             for it in state.shop.items:
+                l_lbl = (it.label or "").lower()
+                l_id = (it.id or "").lower()
+                l_key = str(getattr(it, "key", "") or "").lower()
+                if l_lbl in tier1_voucher_names or l_id in tier1_voucher_names or l_key in tier1_voucher_names:
+                    continue
                 if it.label:
-                    text_blobs.append(it.label.lower())
-                    state_tokens.add(it.label.lower())
+                    text_blobs.append(l_lbl)
+                    state_tokens.add(l_lbl)
                 if it.id:
-                    text_blobs.append(it.id.lower())
-                    state_tokens.add(it.id.lower())
-                if getattr(it, "key", None):
-                    text_blobs.append(str(it.key).lower())
+                    text_blobs.append(l_id)
+                    state_tokens.add(l_id)
+                if l_key:
+                    text_blobs.append(l_key)
 
         # Booster Pack Options
         if state.stage == "OPENING_BOOSTER" and getattr(state, "pack_cards", None):
@@ -235,11 +248,6 @@ class LorebookEngine:
                     text_blobs.append(str(p.label).lower())
                 if getattr(p, "id", None):
                     text_blobs.append(str(p.id).lower())
-
-        # Vouchers Owned
-        for v in getattr(state, "vouchers", []) or []:
-            text_blobs.append(v.lower())
-            state_tokens.add(v.lower())
 
         # Deck Name
         if state.deck_name:
@@ -330,8 +338,8 @@ class LorebookEngine:
     def format_insights_markdown(
         self,
         state: GameState,
-        max_entries: int = 3,
-        max_chars: int = 2400,
+        max_entries: int = 2,
+        max_chars: int = 1500,
     ) -> str:
         """Generates formatted Markdown block containing matched Lorebook insights."""
         matched = self.match_state(state, max_entries=max_entries, max_chars=max_chars)
@@ -384,7 +392,7 @@ class LorebookEngine:
         self.activation_history.clear()
 
 
-def get_lorebook_insights_for_state(state: GameState, max_entries: int = 3) -> str:
+def get_lorebook_insights_for_state(state: GameState, max_entries: int = 2) -> str:
     """Convenience helper to retrieve formatted lorebook insights for GameState."""
     engine = LorebookEngine.get_instance()
     return engine.format_insights_markdown(state, max_entries=max_entries)

@@ -441,28 +441,51 @@ def find_voucher_data(raw_identifier: str | None) -> dict[str, Any] | None:
 
 
 def format_voucher_impact(v_data: dict[str, Any], cost: int = 10, bank: int = 0) -> str:
-    """Formats a detailed, high-conviction markdown analysis of a shop voucher."""
+    """Formats a concise, bank-aware markdown analysis of a shop voucher."""
     name = v_data["name"]
     tier = v_data["tier"]
     effect = v_data["effect"]
     priority = v_data["priority"]
     advice = v_data["advice"]
+    v_key = v_data.get("key", "")
+
+    # Bank-aware priority overrides for delayed-payoff vouchers
+    if v_key == "v_blank" and bank < 25:
+        priority = "SKIP FOR NOW (Bank < $25)"
+        advice = (
+            f"Your bank is ${bank} (< $25 interest cap). Blank gives ZERO immediate combat or economy value! "
+            f"Only buy Blank when you have surplus capital ($25+)."
+        )
+    elif v_key == "v_seed_money" and bank < 25:
+        priority = "SKIP FOR NOW (Bank < $25)"
+        advice = (
+            f"Your bank is ${bank} (< $25). Seed Money only increases interest when you hold $30-$50! "
+            f"Buying it now drops your bank to ${max(0, bank - cost)} and reduces your current interest."
+        )
+
+    cur_interest = min(5, max(0, bank) // 5)
+    after_bank = max(0, bank - cost)
+    after_interest = min(5, after_bank // 5)
+    interest_loss = cur_interest - after_interest
+    econ_suffix = (
+        f" (Costs -${interest_loss}/rnd interest: bank ${bank} → ${after_bank})"
+        if bank >= cost and interest_loss > 0
+        else ""
+    )
 
     lines = []
     if tier == 1:
         up_name = v_data.get("upgrade_name", "Upgraded Version")
         up_effect = v_data.get("upgrade_effect", "")
-        lines.append(f"  > 🎟️ **VOUCHER ANALYSIS: {name} (Tier 1 Base)** [${cost}]:")
-        lines.append(f"  > • **Current Effect**: {effect}")
-        lines.append(f"  > • 🔄 **TIER 2 UNLOCK**: Purchasing this unlocks **{up_name}** ({up_effect}) in future shops!")
-        lines.append(f"  > • **Verdict**: {priority} Priority — {advice}")
+        lines.append(f"  > 🎟️ **VOUCHER ANALYSIS: {name} (Tier 1 Base)** [${cost}]{econ_suffix}:")
+        lines.append(f"  > • **Current Effect**: {effect} (Unlocks Tier 2: **{up_name}** — {up_effect})")
+        lines.append(f"  > • **Verdict**: {priority} — {advice}")
     else:
         base_name = v_data.get("base_name", "Tier 1")
-        lines.append(f"  > 👑 **TIER 2 UPGRADED VOUCHER: {name}** [${cost}]:")
-        lines.append(f"  > • **Elite Effect**: {effect} (Unlocked by your previous purchase of {base_name})")
-        lines.append(f"  > • **Verdict**: {priority} Priority — {advice}")
+        lines.append(f"  > 👑 **TIER 2 UPGRADED VOUCHER: {name}** [${cost}]{econ_suffix}:")
+        lines.append(f"  > • **Elite Effect**: {effect} (Unlocked by {base_name})")
+        lines.append(f"  > • **Verdict**: {priority} — {advice}")
 
-    v_key = v_data.get("key", "")
     if v_key in ("v_directors_cut", "v_retcon"):
         reroll_cost = 10
         total_needed = cost + reroll_cost

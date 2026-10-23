@@ -13,7 +13,7 @@ from rich.panel import Panel
 from ..config import settings
 from ..bridge.client import BalatroBridgeClient, BridgeConnectionError, normalize_id_list
 from ..bridge.schema import GameState
-from ..engine.serializer import serialize_game_state_to_markdown
+from ..engine.serializer import serialize_game_state_to_markdown, get_joker_role, is_xmult_joker
 from ..engine.tools import (
     BALATRO_TOOLS,
     CALCULATION_TOOLS,
@@ -1448,8 +1448,8 @@ class BalatroAgentRunner:
                         else:
                             status_badges.append(f"[cyan]💳 Loyalty: ⏳ {loyalty_remaining} hand(s) left[/cyan]")
 
-                    chip_cnt = sum(1 for j in state.jokers if j.effect_type == "chips" and not j.debuffed)
-                    xmult_cnt = sum(1 for j in state.jokers if j.effect_type == "x_mult" and not j.debuffed)
+                    chip_cnt = sum(1 for j in state.jokers if not j.debuffed and get_joker_role(j) in ("chips", "hybrid"))
+                    xmult_cnt = sum(1 for j in state.jokers if not j.debuffed and (get_joker_role(j) == "x_mult" or is_xmult_joker(j)))
                     if xmult_cnt > 0 and chip_cnt == 0 and state.ante >= 2:
                         status_badges.append("[bold red]🚨 Chip Deficit (0 Chips vs xMult!)[/bold red]")
 
