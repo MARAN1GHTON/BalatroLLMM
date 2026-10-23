@@ -745,10 +745,10 @@ class BalatroRunRecorder:
 
         return "\n".join(md)
 
-    def generate_post_match_dossier(self, max_steps: int = 40) -> str:
-        """Generates a dense, comprehensive analytical dossier of the entire match for the post-match LLM interview.
-        Includes match overview, complete shopping & purchases history, joker progression, scratchpad evolution,
-        and chronological key decision points across all antes.
+    def generate_post_match_dossier(self, max_steps: int = 45) -> str:
+        """Generates an evidence-based analytical dossier of the entire match for the post-match LLM interview.
+        Includes match overview, full shop shelves vs purchases/skips with quotes, critical decision audit,
+        joker & scratchpad evolution, and full hand-by-hand breakdown of the final round.
         """
         last_step = self.steps[-1] if self.steps else None
         final_ante = last_step.ante if last_step else 1
@@ -758,86 +758,130 @@ class BalatroRunRecorder:
         lines = []
         lines.append("### 📊 Сводка забега (Матч-репорт)")
         lines.append(f"- **Колода / Стейк**: `{self.deck_name}` | `{self.stake}`")
-        lines.append(f"- **Достигнутый рубеж**: Ante **{final_ante}** / Round **{final_round}**")
-        lines.append(f"- **Экономика**: Пиковый банк **${self.peak_bank}** (Финальный банк: **${final_bank}**)")
-        lines.append(f"- **Денежный поток**: Заработано **+${self.total_earned}** | Потрачено **-${self.total_spent}**")
-        lines.append(f"- **Статистика**: Рук сыграно **{self.total_hands_played}**, Сбросов использовано **{self.total_discards_used}**, Рероллов лавки **{self.total_rerolls}**, Покупок **{len(self.purchases)}**, Расчётов инструментами **{self.total_calculation_turns}**")
-        lines.append(f"- **Расход токенов**: Input: **{self.total_prompt_tokens:,}** | Output: **{self.total_completion_tokens:,}** | Итого: **{self.total_tokens:,}** токенов")
+        lines.append(f"- **Достигнутый рубеж**: Ante **{final_ante}** / Round **{final_round}** ({last_step.blind_name if last_step else 'Unknown'})")
+        lines.append(f"- **Финальный счёт в последнем раунде**: **{last_step.score:,} / {last_step.target_score:,}** фишек (оставалось рук: {last_step.hands_left if last_step else 0}, сбросов: {last_step.discards_left if last_step else 0})")
+        lines.append(f"- **Экономика**: Пиковый банк **${self.peak_bank}** | Финальный банк: **${final_bank}** | Заработано **+${self.total_earned}** | Потрачено **-${self.total_spent}**")
+        lines.append(
+            f"- **Статистика действий**: Всего шагов **{len(self.steps)}** | Рук сыграно **{self.total_hands_played}** | "
+            f"Сбросов **{self.total_discards_used}** | Рероллов лавки **{self.total_rerolls}** | Покупок **{len(self.purchases)}** | "
+            f"Вызовов калькуляторов (`simulate_hand`/`simulate_shop_buy`/`calculate_hand_odds`/`python_eval`): **{self.total_calculation_turns}**"
+        )
         if self.best_combo:
-            lines.append(f"- **Лучший удар с руки**: **{self.best_combo.score_gained:,} фишек** (Ante {self.best_combo.ante}-{self.best_combo.round} vs {self.best_combo.blind_name}, карты: `{', '.join(self.best_combo.cards_played)}`)")
+            lines.append(
+                f"- **Лучший удар с руки**: **{self.best_combo.score_gained:,} фишек** "
+                f"(Ante {self.best_combo.ante}-{self.best_combo.round} vs {self.best_combo.blind_name}, карты: `{', '.join(self.best_combo.cards_played)}`)"
+            )
         lines.append("")
 
-        # 1. Shopping & Purchases History
-        lines.append("### 🛒 История покупок и магазина:")
-        if self.purchases:
-            for p in self.purchases:
-                lines.append(f"- Ante {p.ante}-{p.round}: **{p.item_label}** (${p.cost}) | Банк после: ${p.bank_after} | Замысел: {p.reasoning[:90]}...")
+        # 1. Shop Audit: Full Shelves, Purchases, Sales, and Skips with Model's Exact Quotes
+        lines.append("### 🛒 Аудит магазинов, покупок и продаж (с витринами и твоими цитатами):")
+        shop_steps = [
+            s for s in self.steps
+            if s.stage in ("SHOP", "OPENING_BOOSTER") or s.action_name in ("buy_shop_item", "sell_joker", "reroll_shop", "select_pack_card", "skip_pack")
+        ]
+        if shop_steps:
+            for s in shop_steps:
+                reason_clean = (s.reasoning or "").replace("\n", " ").strip()
+                if len(reason_clean) > 260:
+                    reason_clean = reason_clean[:257] + "..."
+                shelf_str = ""
+                if s.stage == "SHOP" and s.available_shop_items:
+                    shelf_str = f"\n  Витрина лавки: [{'; '.join(s.available_shop_items)}]"
+                elif s.stage == "OPENING_BOOSTER" and s.available_pack_cards:
+                    shelf_str = f"\n  Карты в бустере: [{'; '.join(s.available_pack_cards)}]"
+                delta_str = f" (Банк: ${s.bank} ➔ ${s.bank + s.dollars_delta})" if s.dollars_delta != 0 else f" (Банк: ${s.bank})"
+                lines.append(
+                    f"- **Шаг {s.step} [Ante {s.ante}-{s.round}, {s.stage}]**: `{s.action_name}({json.dumps(s.action_args, ensure_ascii=False)})`{delta_str}"
+                    f"{shelf_str}\n"
+                    f"  Твоя цитата: *\"{reason_clean}\"*"
+                )
         else:
-            lines.append("- _Ни одной покупки в магазине не совершено за весь забег!_")
+            lines.append("- _Действий в магазине не зафиксировано._")
         lines.append("")
 
-        # 2. Joker Build Progression
+        # 2. Automatic Audit of Questionable / Critical Moments
+        critical_notes: list[str] = []
+        for s in self.steps:
+            # Interest drop detection
+            if s.dollars_delta < 0:
+                before_int = min(5, max(0, s.bank) // 5)
+                after_bank = max(0, s.bank + s.dollars_delta)
+                after_int = min(5, after_bank // 5)
+                if before_int > after_int:
+                    critical_notes.append(
+                        f"- ⚠️ **Потеря процентов банка (Шаг {s.step}, Ante {s.ante}-{s.round})**: Действие `{s.action_name}` уронило банк с ${s.bank} до ${after_bank} "
+                        f"(потеря пассивного дохода с +${before_int}/раунд до +${after_int}/раунд)."
+                    )
+            if s.action_name == "sell_joker":
+                critical_notes.append(
+                    f"- 🔄 **Продажа джокера (Шаг {s.step}, Ante {s.ante}-{s.round}, {s.stage})**: `{json.dumps(s.action_args, ensure_ascii=False)}` при банке ${s.bank}. "
+                    f"Мотив: *\"{(s.reasoning or '')[:180]}\"*"
+                )
+            if not s.success and s.error_message:
+                critical_notes.append(
+                    f"- ❌ **Ошибка вызова инструмента (Шаг {s.step}, Ante {s.ante}-{s.round})**: `{s.action_name}` отклонён (`{s.error_message}`)."
+                )
+        if self.total_calculation_turns == 0:
+            critical_notes.append(
+                "- 🧮 **Игнорирование калькуляторов**: За весь забег ты **0 раз** вызвал `simulate_hand`, `simulate_shop_buy`, `calculate_hand_odds` или `python_eval`."
+            )
+
+        if critical_notes:
+            lines.append("### 🚨 Автоматический детектор острых и спорных моментов лога:")
+            lines.extend(critical_notes[:12])
+            lines.append("")
+
+        # 3. Joker Build Progression
         lines.append("### 🃏 Эволюция сборки джокеров:")
         if self.joker_build_history:
             for jb in self.joker_build_history:
                 j_str = " ➔ ".join(jb["jokers"]) if jb["jokers"] else "Пусто (0 джокеров)"
-                lines.append(f"- Ante {jb['ante']} (R{jb['round']}): [{j_str}] — {jb['reason'][:80]}")
+                lines.append(f"- Ante {jb['ante']} (R{jb['round']}): [{j_str}] — {jb['reason'][:140]}")
         else:
             lines.append("- _Джокеры не приобретались (голая колода)._")
         lines.append("")
 
-        # 3. Scratchpad Evolution
+        # 4. Scratchpad Evolution
         if self.scratchpad_history:
             lines.append("### 📝 Эволюция стратегического блокнота (Scratchpad):")
             for sp in self.scratchpad_history:
                 lines.append(f"- Шаг {sp['step']} (Ante {sp['ante']}-{sp['round']}, {sp.get('stage', 'GAME')}): *\"{sp['note']}\"*")
             lines.append("")
 
-        # 3b. Lorebook Knowledge Consulted
-        try:
-            from .lorebook import LorebookEngine
-            lb_summary = LorebookEngine.get_instance().get_usage_summary()
-            if lb_summary.get("total_activations", 0) > 0:
-                lines.append("### 📖 Использование базы знаний (Лорбука):")
-                lines.append(f"- Всего обращений к карточкам знаний: {lb_summary.get('total_activations')}")
-                lines.append(f"- Уникальных карточек знаний задействовано: {lb_summary.get('unique_cards_matched')}")
-                top_items = [f"{title} ({cnt}x)" for title, cnt in lb_summary.get("top_consulted_cards", [])[:5]]
-                lines.append(f"- Топ задействованных знаний: {', '.join(top_items)}")
-                lines.append("")
-        except Exception:
-            pass
+        # 5. Final Round Detailed Hand-by-Hand Replay
+        final_round_steps = [s for s in self.steps if s.ante == final_ante and s.round == final_round]
+        if final_round_steps:
+            lines.append(f"### 💀 Подробная покадровая хроника финального раунда (Ante {final_ante}, Round {final_round} — {last_step.blind_name if last_step else ''}):")
+            for s in final_round_steps:
+                hand_str = f"\n  Карты в руке: [{', '.join(s.hand_cards)}]" if s.hand_cards else ""
+                jokers_str = f"\n  Активные джокеры: [{'; '.join(s.active_jokers)}]" if s.active_jokers else ""
+                score_delta_str = f" ➔ **+{s.score_delta:,} очков** (Итого: {s.score + s.score_delta:,}/{s.target_score:,})" if s.score_delta > 0 else ""
+                reason_full = (s.reasoning or "").replace("\n", " ").strip()
+                if len(reason_full) > 300:
+                    reason_full = reason_full[:297] + "..."
+                lines.append(
+                    f"- **Шаг {s.step} [{s.stage}]**: `{s.action_name}({json.dumps(s.action_args, ensure_ascii=False)})` | "
+                    f"Счёт до хода: {s.score:,}/{s.target_score:,} | Рук: {s.hands_left}, Сбросов: {s.discards_left} | Банк: ${s.bank}{score_delta_str}"
+                    f"{jokers_str}{hand_str}\n"
+                    f"  Твои мысли: *\"{reason_full}\"*"
+                )
+            lines.append("")
 
-        # 4. Turn-by-Turn Key Chronicle
-        lines.append("### 📜 Хронология ключевых решений (Turn-by-Turn):")
-        total_s = len(self.steps)
-        if total_s <= max_steps:
-            steps_to_show = self.steps
-        else:
-            seen_step_nums = set()
-            important_steps = []
-            for s in self.steps:
-                if s.stage in ("BLIND_SELECT", "SHOP", "OPENING_BOOSTER") or s.offered_skip_tag:
-                    if s.step not in seen_step_nums:
-                        seen_step_nums.add(s.step)
-                        important_steps.append(s)
-            for s in self.steps[-10:]:
-                if s.step not in seen_step_nums:
-                    seen_step_nums.add(s.step)
-                    important_steps.append(s)
-            steps_to_show = sorted(important_steps, key=lambda x: x.step)
-
-        for s in steps_to_show:
-            tag_str = f" [Тег: {s.offered_skip_tag}]" if s.offered_skip_tag else ""
-            shop_str = f" [Товаров в лавке: {len(s.available_shop_items)}]" if s.stage == "SHOP" else ""
-            score_delta_str = f" (+{s.score_delta:,} chips)" if s.score_delta > 0 else ""
-            reason = (s.reasoning or "").replace("\n", " ").strip()
-            if len(reason) > 130:
-                reason = reason[:127] + "..."
-            lines.append(
-                f"- Шаг {s.step} [Ante {s.ante}-{s.round}, {s.stage}]: `{s.action_name}` | "
-                f"Банк: ${s.bank} | Счёт: {s.score}/{s.target_score}{score_delta_str}{tag_str}{shop_str}\n"
-                f"  Мысли: \"{reason}\""
-            )
+        # 6. Earlier Combat & Blind Selection Chronicle
+        earlier_steps = [s for s in self.steps if not (s.ante == final_ante and s.round == final_round)]
+        if earlier_steps:
+            lines.append("### 📜 Хронология предыдущих раундов (Анте 1 — до финала):")
+            steps_to_show = earlier_steps[-max_steps:] if len(earlier_steps) > max_steps else earlier_steps
+            for s in steps_to_show:
+                score_delta_str = f" (+{s.score_delta:,} очков)" if s.score_delta > 0 else ""
+                reason_short = (s.reasoning or "").replace("\n", " ").strip()
+                if len(reason_short) > 180:
+                    reason_short = reason_short[:177] + "..."
+                lines.append(
+                    f"- Шаг {s.step} [Ante {s.ante}-{s.round} {s.blind_name}, {s.stage}]: `{s.action_name}` | "
+                    f"Банк: ${s.bank} | Счёт: {s.score:,}/{s.target_score:,}{score_delta_str}\n"
+                    f"  Мысли: \"{reason_short}\""
+                )
 
         return "\n".join(lines)
 

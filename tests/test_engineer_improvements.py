@@ -353,6 +353,65 @@ class TestEngineerImprovements(unittest.TestCase):
         self.assertIn("does NOT replace a +Chips or xMult Joker", impact)
         self.assertIn("Costs -$1/rnd interest: bank $11 → $7", impact)
 
+    def test_post_match_dossier_evidence_and_audit(self):
+        import tempfile
+        from src.engine.recorder import BalatroRunRecorder
+        from src.engine.tools import ToolCallAction
+        from src.bridge.schema import ShopModel
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            rec = BalatroRunRecorder(output_dir=Path(tmp_dir), model="test-model", provider="test")
+            shop_state = GameState(
+                stage="SHOP",
+                ante=2,
+                round=4,
+                dollars=11,
+                shop=ShopModel(
+                    items=[
+                        ShopItemModel(index=1, id="v_blank", label="Blank", item_type="Voucher", cost=10, desc="Does nothing?"),
+                        ShopItemModel(index=2, id="j_blue", label="Blue Joker", item_type="Joker", cost=5, desc="+2 Chips per card"),
+                    ],
+                    reroll_cost=5,
+                ),
+            )
+            after_shop = GameState(stage="SHOP", ante=2, round=4, dollars=1)
+            buy_action = ToolCallAction(
+                name="buy_shop_item",
+                arguments={"shop_index": 1},
+                reason="Buying Blank voucher for future Antimatter unlock.",
+            )
+            rec.record_step(shop_state, buy_action, True, after_shop)
+
+            final_state = GameState(
+                stage="SELECTING_HAND",
+                ante=3,
+                round=6,
+                dollars=1,
+                current_score=1200,
+                target_score=4000,
+                hands_left=1,
+                discards_left=0,
+                blind=BlindModel(name="The Window", is_boss=True, chips_needed=4000),
+                hand=[
+                    CardModel(id="c1", rank="Ace", suit="Spades"),
+                    CardModel(id="c2", rank="King", suit="Diamonds", debuffed=True),
+                ],
+            )
+            play_action = ToolCallAction(
+                name="play_cards",
+                arguments={"card_ids": ["c1", "c2"]},
+                reason="Playing Ace and King as final hand.",
+            )
+            rec.record_step(final_state, play_action, True, final_state)
+
+            dossier = rec.generate_post_match_dossier()
+            self.assertIn("Витрина лавки:", dossier)
+            self.assertIn("Blue Joker", dossier)
+            self.assertIn("Потеря процентов банка", dossier)
+            self.assertIn("Игнорирование калькуляторов", dossier)
+            self.assertIn("Подробная покадровая хроника финального раунда", dossier)
+            self.assertIn("Карты в руке:", dossier)
+
 
 if __name__ == "__main__":
     unittest.main()
