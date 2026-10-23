@@ -1666,22 +1666,6 @@ def serialize_game_state_to_markdown(
 
     lines.append(f"### BALATRO STATE: Ante {state.ante}/8 | Round {state.round} | Phase: **{state.stage}**")
 
-    if scratchpad:
-        if scratchpad_ante and state.ante > scratchpad_ante:
-            lines.append(
-                f"\n#### 📝 STRATEGIC SCRATCHPAD (⚠️ AUDIT MANDATORY - PLAN EXPIRED!):\n"
-                f"> 🚨 **STALE PLAN EXPIRED** (Formulated in Ante {scratchpad_ante}, current is Ante {state.ante})!\n"
-                f"> *Previous Plan*: \"{scratchpad}\"\n"
-                f"> 💥 **ANTE SCALING WARNING**: Ante {state.ante} blind targets have jumped significantly! Your Ante {scratchpad_ante} setup may no longer mathematically scale.\n"
-                f"> **ACTION REQUIRED**: Audit your Joker synergies vs upcoming Boss target and write an updated strategy in `plan_notes`!"
-            )
-        else:
-            lines.append(
-                f"\n#### 📝 STRATEGIC SCRATCHPAD (ACTIVE ANTE {state.ante} PLAN):\n"
-                f"> **Current Plan**: {scratchpad}\n"
-                f"> *(⚠️ Dynamic Adaptation: Do NOT cling to plans if damage has plateaued! Compare your Best Hand vs Boss Target below. If numbers don't add up, CHANGE your plan to acquire xMult and update `plan_notes`!)*"
-            )
-
     deck_info = f"- **Deck**: `{state.deck_name}` | **Difficulty**: `{state.stake}`"
     if state.challenge_name:
         deck_info += f" | 🏆 **Challenge Mode**: `{state.challenge_name}`"
@@ -1812,6 +1796,27 @@ def serialize_game_state_to_markdown(
         lines.append(
             f"- **Boss Benchmark**: Run Peak Hand: **{max_hand_score:,} chips**{desc_str} vs Boss Target: **{boss_chips:,} chips** ({cov_pct:.1f}% coverage)"
         )
+
+    # 1c. Macro-Strategic Scratchpad (placed AFTER objective facts & Reality Check to prevent self-anchoring bias)
+    if scratchpad:
+        if scratchpad_ante and state.ante > scratchpad_ante:
+            lines.append(
+                f"\n#### 📝 YOUR PREVIOUS ANTE NOTE (⚠️ WROTE IN ANTE {scratchpad_ante} — AUDIT AGAINST ANTE {state.ante} FACTS ABOVE!):\n"
+                f"> *Saved Hypothesis (Ante {scratchpad_ante})*: \"{scratchpad}\"\n"
+                f"> 🚨 **STALE PLAN WARNING**: Blind scaling has jumped in Ante {state.ante} (Boss target: **{boss_chips:,} chips**). "
+                f"Do NOT blindly follow this old note if your damage or Jokers have changed — update `plan_notes` in Shop/Blind Select!"
+            )
+        else:
+            update_hint = (
+                "Update `plan_notes` if your build, economy target, or Boss plan changes."
+                if state.stage in ("SHOP", "BLIND_SELECT")
+                else "Read-only during combat: always prioritize live hand math and Boss rules above over this note!"
+            )
+            lines.append(
+                f"\n#### 📝 YOUR MACRO-STRATEGY NOTE (SAVED IN ANTE {state.ante} SHOP / BLIND SELECT):\n"
+                f"> *Working Hypothesis*: \"{scratchpad}\"\n"
+                f"> *(🔍 Anti-Tunnel-Vision Check: This is your own past note, NOT a mandatory rule. {update_hint})*"
+            )
 
     # Remaining Draw Pile Breakdown
     if state.deck_summary:

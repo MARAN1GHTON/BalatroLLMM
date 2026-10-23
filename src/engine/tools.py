@@ -440,14 +440,34 @@ GAME_ACTION_TOOLS: list[dict[str, Any]] = [
     t for t in BALATRO_TOOLS if t.get("function", {}).get("name") not in CALCULATION_TOOLS
 ]
 
-# Automatically attach optional plan_notes property to all tools for the strategic scratchpad
+# Tools where macro-strategic scratchpad (plan_notes) updates are allowed.
+# Combat micro-actions (play_cards, discard_cards, reorder_hand, select_pack_card) are excluded
+# so tactical hand commentary never overwrites the run's macro strategy.
+STRATEGIC_SCRATCHPAD_TOOLS: set[str] = {
+    "buy_shop_item",
+    "sell_joker",
+    "reroll_shop",
+    "end_shop",
+    "select_blind",
+    "skip_blind",
+    "reroll_boss_blind",
+}
+
+# Attach optional plan_notes property ONLY to macro-strategic Shop / Blind Select tools
 for _tool in BALATRO_TOOLS:
-    _params = _tool.get("function", {}).get("parameters", {})
+    _fn = _tool.get("function", {})
+    if _fn.get("name") not in STRATEGIC_SCRATCHPAD_TOOLS:
+        continue
+    _params = _fn.get("parameters", {})
     _props = _params.get("properties", {})
     if "plan_notes" not in _props:
         _props["plan_notes"] = {
             "type": "string",
-            "description": "Optional: Update your strategic scratchpad notes (1-2 sentences summarizing current engine, scaling target, upcoming boss counters, or reasons for pivoting).",
+            "description": (
+                "Optional: Update your persistent macro-strategy note for this Ante "
+                "(concise format: '[Engine: ... | Bottleneck/Shop Goal: ... | Boss Counter: ...]'). "
+                "Do NOT write single-hand combat descriptions here; only update when your build, economy target, or boss plan changes."
+            ),
         }
 
 

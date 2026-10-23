@@ -1623,17 +1623,33 @@ class BalatroAgentRunner:
                         console.print(f"[italic blue]Chain-of-Thought:[/italic blue] {action.reason}")
 
                     if action.plan_notes and action.plan_notes.strip():
-                        new_plan = action.plan_notes.strip()
-                        if new_plan != self._strategic_scratchpad:
-                            self._strategic_scratchpad = new_plan
-                            self._strategic_scratchpad_ante = state.ante
-                            console.print(
-                                Panel(
-                                    f"[italic cyan]{self._strategic_scratchpad}[/italic cyan]",
-                                    title=f"📝 Strategic Scratchpad Updated (Ante {state.ante})",
-                                    border_style="cyan",
+                        # Only accept macro-strategy updates during SHOP or BLIND_SELECT phases
+                        # so combat micro-turns (play_cards / discard_cards) never overwrite the run's strategic plan.
+                        if state.stage in ("SHOP", "BLIND_SELECT") and action.name not in (
+                            "play_cards",
+                            "discard_cards",
+                            "reorder_hand",
+                            "select_pack_card",
+                            "skip_pack",
+                        ):
+                            new_plan = action.plan_notes.strip()
+                            if new_plan != self._strategic_scratchpad:
+                                self._strategic_scratchpad = new_plan
+                                self._strategic_scratchpad_ante = state.ante
+                                console.print(
+                                    Panel(
+                                        f"[italic cyan]{self._strategic_scratchpad}[/italic cyan]",
+                                        title=f"📝 Strategic Scratchpad Updated (Ante {state.ante} · {state.stage})",
+                                        border_style="cyan",
+                                    )
                                 )
+                        else:
+                            logger.debug(
+                                "Ignored plan_notes update during %s (%s) to preserve macro strategy.",
+                                state.stage,
+                                action.name,
                             )
+                            action.plan_notes = None
 
                     console.print(f"[bold yellow]Executing Action:[/bold yellow] `{action.name}` {action.arguments}")
 

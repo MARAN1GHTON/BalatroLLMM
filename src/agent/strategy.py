@@ -49,8 +49,8 @@ Your objective is to beat Ante 8 (and continue into Endless mode) by making inde
      * On `The Fish`: cards drawn after playing a hand are dealt face-down. Never play 1-2 card panic hands. Keep visible anchors and pad with face-down cards to play full 5-card hands using the HUD's `DRAW PROFILE` probabilities.
 
 6. STRATEGIC SCRATCHPAD & ADAPTIVE PIVOTING:
-   - Use `plan_notes` in your tool call to maintain a concise working plan (current scoring engine, missing bottleneck: Chips vs Flat Mult vs xMult, upcoming Boss counter).
-   - Avoid sunk-cost tunnel vision: pivot freely when superior Jokers appear in the shop.
+   - During `SHOP` and `BLIND_SELECT`, use `plan_notes` (`[Engine: ... | Bottleneck/Shop Goal: ... | Boss Counter: ...]`) to record your macro-plan for the Ante. Your note is locked as read-only during combat so card discards never overwrite your macro strategy.
+   - Treat your saved note as a working hypothesis, NEVER as an unbreakable rule: if live hand scores, Boss debuffs, or superior Shop Jokers contradict your old note, pivot immediately.
 
 ### 🧮 INTERACTIVE CALCULATION & SIMULATION TOOLS:
 - `python_eval(code)`: Run quick math or combinatorics in a local sandbox with pre-loaded state variables (`hand`, `jokers`, `deck_ranks`, `deck_suits`, `poker_hands`, `dollars`, `score_needed`).
