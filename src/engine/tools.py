@@ -105,6 +105,10 @@ BALATRO_TOOLS = [
                         "type": "integer",
                         "description": "Zero-based index of the shop slot to buy",
                     },
+                    "sell_joker_id": {
+                        "type": "string",
+                        "description": "Optional ID of an owned Joker to sell first if Joker slots are full (5/5) or to raise cash for this purchase",
+                    },
                     "reason": {
                         "type": "string",
                         "description": "Synergy justification, economic impact, and deck strategy",

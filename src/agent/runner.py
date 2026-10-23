@@ -22,7 +22,8 @@ from ..engine.tools import (
     get_available_tools,
     ToolCallAction,
 )
-from ..engine.calculator import execute_calculation_tool
+from ..engine.calculator import execute_calculation_tool, resolve_card_ids
+from ..engine.scoring import BalatroScoringEngine
 from ..engine.recorder import BalatroRunRecorder
 from .strategy import SYSTEM_STRATEGY_PROMPT
 
@@ -114,6 +115,10 @@ class BalatroAgentRunner:
         self._resumed_checkpoint_checked: bool = False
         self._strategic_scratchpad: str = "Survive Ante 1: build economy toward $25 interest, acquire early flat chips and flat mult Jokers."
         self._strategic_scratchpad_ante: int = 1
+        self._tracked_round_key: tuple[int, int] | None = None
+        self._current_round_played_hands: list[str] = []
+        self._tracked_ante: int | None = None
+        self._current_ante_played_card_ids: set[str] = set()
 
         # Adaptive backoff controllers for geometric protection
         self.llm_backoff = AdaptiveBackoff()
@@ -889,21 +894,56 @@ class BalatroAgentRunner:
                 console.print("[bold red]⛔ ILLEGAL ACTION BLOCKED:[/bold red] Model attempted play_cards with 0 hands left! Action rejected.")
                 return False
             raw_cards = args.get("card_ids") or args.get("card_id") or args.get("cards", [])
-            return await self.bridge.play_cards(normalize_id_list(raw_cards))
+            card_ids = resolve_card_ids(raw_cards, state.hand if state else None)
+            played_hand_type = None
+            if state and state.hand and card_ids:
+                id_map = {c.id: c for c in state.hand}
+                chosen_cards = [id_map[cid] for cid in card_ids if cid in id_map]
+                if chosen_cards:
+                    scoring_engine = BalatroScoringEngine()
+                    played_hand_type = scoring_engine.identify_poker_hand(chosen_cards)[0]
+                    opt_cards = scoring_engine.optimize_card_order_for_scoring(
+                        chosen_cards, hand_type=played_hand_type, state=state
+                    )
+                    opt_ids = [c.id for c in opt_cards]
+                    if opt_ids != card_ids and set(opt_ids) == set(card_ids):
+                        logger.info("Auto-optimized played card order for scoring: %s -> %s", card_ids, opt_ids)
+                        card_ids = opt_ids
+            ok = await self.bridge.play_cards(card_ids)
+            if ok:
+                if played_hand_type and played_hand_type not in self._current_round_played_hands:
+                    self._current_round_played_hands.append(played_hand_type)
+                for cid in card_ids:
+                    self._current_ante_played_card_ids.add(str(cid))
+            return ok
         elif name == "discard_cards":
             if state and (state.discards_left or 0) <= 0:
                 logger.error("ILLEGAL ACTION BLOCKED: Model attempted discard_cards with 0 discards left!")
                 console.print("[bold red]⛔ ILLEGAL ACTION BLOCKED:[/bold red] Model attempted discard_cards with 0 discards left! Discard cheat blocked.")
                 return False
             raw_cards = args.get("card_ids") or args.get("card_id") or args.get("cards", [])
-            return await self.bridge.discard_cards(normalize_id_list(raw_cards))
+            card_ids = resolve_card_ids(raw_cards, state.hand if state else None)
+            return await self.bridge.discard_cards(card_ids)
         elif name == "reorder_jokers":
             raw_order = args.get("joker_order") or args.get("jokers") or args.get("order", [])
             return await self.bridge.reorder_jokers(normalize_id_list(raw_order))
         elif name == "reorder_hand":
             raw_order = args.get("card_order") or args.get("cards") or args.get("order", [])
-            return await self.bridge.reorder_hand(normalize_id_list(raw_order))
+            card_ids = resolve_card_ids(raw_order, state.hand if state else None)
+            return await self.bridge.reorder_hand(card_ids)
         elif name == "buy_shop_item":
+            sell_jid = str(args.get("sell_joker_id") or "").strip()
+            if sell_jid:
+                logger.info("Executing atomic sell_joker_id='%s' before buy_shop_item...", sell_jid)
+                sold_ok = await self.bridge.sell_joker(sell_jid)
+                if sold_ok:
+                    await asyncio.sleep(0.6)
+                else:
+                    logger.warning(
+                        "Pre-buy sell_joker('%s') returned False (%s), attempting buy anyway...",
+                        sell_jid,
+                        self.bridge.last_error,
+                    )
             return await self.bridge.buy_card(args.get("shop_index", 0))
         elif name == "reroll_shop":
             return await self.bridge.reroll_shop()
@@ -920,7 +960,8 @@ class BalatroAgentRunner:
         elif name == "end_shop":
             return await self.bridge.end_shop()
         elif name == "use_consumable":
-            target_ids = normalize_id_list(args.get("target_card_ids") or args.get("target_cards") or args.get("card_ids"))
+            raw_targets = args.get("target_card_ids") or args.get("target_cards") or args.get("card_ids")
+            target_ids = resolve_card_ids(raw_targets, state.hand if state else None)
             if not target_ids and state and state.hand and state.consumables:
                 cid = args.get("card_id", "")
                 chosen_cons = next((it for it in state.consumables if it.id == cid), None)
@@ -938,7 +979,8 @@ class BalatroAgentRunner:
         elif name == "sell_consumable":
             return await self.bridge.sell_consumable(args.get("card_id", ""))
         elif name == "select_pack_card":
-            target_ids = normalize_id_list(args.get("target_card_ids") or args.get("target_cards") or args.get("card_ids"))
+            raw_targets = args.get("target_card_ids") or args.get("target_cards") or args.get("card_ids")
+            target_ids = resolve_card_ids(raw_targets, state.hand if state else None)
             if not target_ids and state and state.hand and state.pack_cards:
                 cid = args.get("card_id", "")
                 chosen_item = next((it for it in state.pack_cards if it.id == cid), None)
@@ -949,10 +991,21 @@ class BalatroAgentRunner:
                         unenhanced = [c.id for c in state.hand if not getattr(c, "enhancement", None)]
                         target_ids = unenhanced[:count] if len(unenhanced) >= count else [c.id for c in state.hand[:count]]
                         logger.info("Auto-assigned target_card_ids=%s for booster card '%s'", target_ids, chosen_item.label)
-            return await self.bridge.select_pack_card(
-                args.get("card_id", ""),
-                target_ids,
-            )
+            card_id = args.get("card_id", "")
+            for attempt in range(4):
+                ok = await self.bridge.select_pack_card(card_id, target_ids)
+                if ok:
+                    return True
+                err_lower = (self.bridge.last_error or "").lower()
+                if attempt < 3 and ("animation" in err_lower or "locks" in err_lower or "busy" in err_lower):
+                    logger.info(
+                        "select_pack_card blocked by animation lock (attempt %d/4). Waiting 0.6s...",
+                        attempt + 1,
+                    )
+                    await asyncio.sleep(0.6)
+                    continue
+                break
+            return False
         elif name == "skip_pack":
             return await self.bridge.skip_pack()
         else:
@@ -1425,6 +1478,30 @@ class BalatroAgentRunner:
                     else:
                         self._shop_empty_retries = 0
 
+                    # 3c. Sync local round/ante tracking for Boss Blinds (The Mouth, The Eye, The Pillar) & Card Sharp
+                    round_key = (state.ante, state.round)
+                    if self._tracked_round_key != round_key:
+                        self._tracked_round_key = round_key
+                        self._current_round_played_hands = []
+                    if self._current_round_played_hands:
+                        merged_hands = list(state.played_hand_types_this_round or [])
+                        for h_name in self._current_round_played_hands:
+                            if h_name not in merged_hands:
+                                merged_hands.append(h_name)
+                        state.played_hand_types_this_round = merged_hands
+
+                    if self._tracked_ante != state.ante:
+                        self._tracked_ante = state.ante
+                        self._current_ante_played_card_ids = set()
+                    if self._current_ante_played_card_ids:
+                        for c in state.hand:
+                            if str(c.id) in self._current_ante_played_card_ids:
+                                c.played_this_ante = True
+                        if state.deck_summary and state.deck_summary.cards:
+                            for c in state.deck_summary.cards:
+                                if str(c.id) in self._current_ante_played_card_ids:
+                                    c.played_this_ante = True
+
                     # 4. Track Loyalty Card cycle & build indicators
                     has_loyalty = any("loyalty" in (j.key or "").lower() or "loyalty" in (j.label or "").lower() for j in state.jokers)
                     loyalty_remaining: int | None = None
@@ -1626,6 +1703,22 @@ class BalatroAgentRunner:
                                 elif not poll_state.is_animating:
                                     next_state = poll_state
                                     break
+                            except Exception:
+                                pass
+                            await asyncio.sleep(0.4)
+                    elif action.name == "select_pack_card":
+                        await asyncio.sleep(1.0)
+                        for _ in range(16):
+                            try:
+                                poll_state = await self.bridge.fetch_state()
+                                if not poll_state.is_animating and poll_state.stage != "PLAYING_TAROT":
+                                    if poll_state.stage == "OPENING_BOOSTER":
+                                        if len(poll_state.pack_cards) > 0:
+                                            next_state = poll_state
+                                            break
+                                    elif poll_state.stage in ("SHOP", "SELECTING_HAND", "BLIND_SELECT", "ROUND_EVAL", "GAME_OVER"):
+                                        next_state = poll_state
+                                        break
                             except Exception:
                                 pass
                             await asyncio.sleep(0.4)

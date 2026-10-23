@@ -45,7 +45,7 @@ CARD_SEAL_DESCS: dict[str, str] = {
 }
 
 
-def format_card_compact(card: CardModel, is_the_mark: bool = False) -> str:
+def format_card_compact(card: CardModel, is_the_mark: bool = False, is_pillar_ante: bool = False) -> str:
     """Format single card into dense representation: [ID: Rank Suit | Mods]."""
     suit_symbols = {
         "Hearts": "♥",
@@ -80,6 +80,8 @@ def format_card_compact(card: CardModel, is_the_mark: bool = False) -> str:
         mods.append(f"x{card.x_mult}m")
     if card.debuffed:
         mods.append("⚠️DEBUFFED")
+    elif is_pillar_ante and getattr(card, "played_this_ante", False):
+        mods.append("🏛️PLAYED_THIS_ANTE")
 
     mod_str = f" | {', '.join(mods)}" if mods else ""
     return f"[{card.id}: {card.rank}{symbol}{mod_str}]"
@@ -113,6 +115,15 @@ KNOWN_JOKER_CLEAN_DESCS: dict[str, str] = {
     "j_the_tribe": "X2 Mult if played hand contains a Flush",
     "j_baron": "Each King held in hand gives X1.5 Mult",
     "j_photograph": "First played face card gives X2 Mult when scored",
+    "j_ancient": "Each played card with target suit gives X1.5 Mult when scored (suit changes at end of round)",
+    "j_idol": "Each played card of target rank and suit gives X2 Mult when scored (changes every round)",
+    "j_seeing_double": "X2 Mult if played hand has a scoring Club ♣ card and a scoring card of any other suit",
+    "j_flower_pot": "X3 Mult if poker hand contains a Diamond ♦, Club ♣, Heart ♥, and Spade ♠ card",
+    "j_hit_the_road": "Gains X0.5 Mult for every Jack discarded this round (resets at end of round)",
+    "j_drivers_license": "X3 Mult if you have at least 16 Enhanced cards in your full deck",
+    "j_baseball": "Uncommon Jokers each give X1.5 Mult",
+    "j_stencil": "X1 Mult for each empty Joker slot (Joker Stencil included)",
+    "j_ramen": "X2 Mult, loses X0.01 Mult per card discarded",
 
     # Legendary Jokers (Spawned strictly by The Soul)
     "j_caino": "Gains X1 Mult when a face card is destroyed (⚠️ Starts at base X1.0 Mult; destroy face cards to scale!)",
@@ -123,6 +134,11 @@ KNOWN_JOKER_CLEAN_DESCS: dict[str, str] = {
     "j_perkeo": "Creates a Negative copy of 1 random consumable in your possession at the end of the shop",
 
     # Flat Chips & Mult Jokers with placeholders
+    "j_joker": "+4 Mult",
+    "j_greedy_joker": "Played cards with Diamond ♦ suit give +3 Mult when scored",
+    "j_lusty_joker": "Played cards with Heart ♥ suit give +3 Mult when scored",
+    "j_wrathful_joker": "Played cards with Spade ♠ suit give +3 Mult when scored",
+    "j_gluttonous_joker": "Played cards with Club ♣ suit give +3 Mult when scored",
     "j_sly": "+50 Chips if played hand contains a Pair",
     "j_wily": "+100 Chips if played hand contains Three of a Kind",
     "j_clever": "+80 Chips if played hand contains Two Pair",
@@ -147,7 +163,7 @@ KNOWN_JOKER_CLEAN_DESCS: dict[str, str] = {
     "j_popcorn": "+20 Mult, -4 Mult per round played",
     "j_gros_michel": "+15 Mult. 1 in 6 chance to go extinct at end of round",
     "j_even_steven": "Played cards with even rank (2, 4, 6, 8, 10) give +4 Mult when scored",
-    "j_odd_todd": "Played cards with odd rank (3, 5, 7, 9, A) give +30 Chips when scored",
+    "j_odd_todd": "Played cards with odd rank (3, 5, 7, 9, A) give +31 Chips when scored",
     "j_scholar": "Played Aces give +20 Chips and +4 Mult when scored",
     "j_fibonacci": "Played Ace, 2, 3, 5, or 8 gives +8 Mult when scored",
     "j_walkie_talkie": "Played 10s and 4s give +10 Chips and +4 Mult when scored",
@@ -161,10 +177,12 @@ KNOWN_JOKER_CLEAN_DESCS: dict[str, str] = {
     "j_mystic_summit": "+15 Mult when 0 discards remain",
     "j_loyalty_card": "X4 Mult every 6 hands played",
     "j_stone_joker": "+25 Chips for each Stone Card in your full deck",
+    "j_stone": "+25 Chips for each Stone Card in your full deck",
     "j_arrowhead": "Played cards with Spade ♠ suit give +50 Chips when scored",
-    "j_onyx_agate": "Played cards with Spade ♠ suit give +7 Mult when scored",
+    "j_onyx_agate": "Played cards with Club ♣ suit give +7 Mult when scored",
     "j_bloodstone": "1 in 2 chance for played Heart ♥ cards to give X1.5 Mult when scored",
     "j_rough_gem": "Played cards with Diamond ♦ suit earn $1 when scored",
+    "j_erosion": "+4 Mult for each card below starting deck size",
     # Common Utility, Econ & Scaling Chip Jokers
     "j_splash": "Every played card counts in scoring (even non-combo kickers)",
     "j_luchador": "Sell this card during a Boss Blind to disable the active Boss Blind",
@@ -184,22 +202,56 @@ KNOWN_JOKER_CLEAN_DESCS: dict[str, str] = {
     "j_hack": "Retrigger each played 2, 3, 4, or 5",
     "j_dusk": "Retrigger all played cards in final hand of round",
     "j_mime": "Retrigger all card held in hand abilities (Steel cards, Baron, Shoot the Moon, Seals)",
+    "j_selzer": "Retrigger all cards played for the next 10 hands",
+    "j_seltzer": "Retrigger all cards played for the next 10 hands",
     "j_blueprint": "Copies ability of Joker to the right",
     "j_brainstorm": "Copies ability of leftmost Joker",
     "j_juggler": "+1 hand size",
     "j_drunkard": "+1 discard each round",
     "j_troubadour": "+2 hand size, -1 hand each round",
+    "j_turtle_bean": "+5 hand size, reduces by 1 every round",
+    "j_merry_andy": "+3 discards each round, -1 hand size",
     "j_burglar": "When Blind is selected, gain +3 Hands and lose all discards",
+    "j_riff_raff": "When Blind is selected, create 2 Common Jokers (must have room)",
+    "j_hallucination": "1 in 2 chance to create a Tarot card when any Booster Pack is opened",
+    "j_space": "1 in 4 chance to upgrade level of played poker hand",
+    "j_burnt": "Upgrade the level of the first discarded poker hand each round",
+    "j_dna": "If first hand of round has only 1 card, add a permanent copy to deck and draw it to hand",
+    "j_sixth_sense": "If first hand of round is a single 6, destroy it and create a Spectral card",
+    "j_vagabond": "Create a Tarot card if hand is played with $4 or less",
+    "j_superposition": "Create a Tarot card if poker hand contains an Ace and a Straight",
+    "j_seance": "If poker hand is a Straight Flush, create a random Spectral card",
+    "j_8_ball": "1 in 4 chance for each played 8 to create a Tarot card when scored",
+    "j_cartomancer": "Create a Tarot card when Blind is selected",
+    "j_astronomer": "All Planet cards and Celestial Packs in the shop are free ($0)",
+    "j_marble": "Adds 1 Stone card to deck when Blind is selected",
+    "j_certificate": "When round begins, add a random playing card with a random seal to your hand",
+    "j_mr_bones": "Prevents Death if chips scored are at least 25% of required chips (self-destructs)",
+    "j_invisible": "After 2 rounds, sell this card to Duplicate a random Joker",
+    "j_ring_master": "Joker, Tarot, Planet, and Spectral cards may appear multiple times",
+    "j_diet_cola": "Sell this card to create a free Double Tag",
+    "j_oops": "Doubles all listed probabilities (e.g. 1 in 4 becomes 2 in 4)",
     "j_business": "Played face cards have a 1 in 2 chance to give $2 when scored",
     "j_mail": "Earn $5 for each discarded card of target rank (rank changes each round)",
     "j_golden": "Earn $4 at end of round",
     "j_delayed_grat": "Earn $2 per discard if no discards are used by end of round",
     "j_credit_card": "Go up to -$20 in debt",
     "j_egg": "Gains $3 of sell value at end of round",
+    "j_to_the_moon": "Earn an extra $1 of interest for every $5 you have at end of round",
+    "j_cloud_9": "Earn $1 for each 9 in your full deck at end of round",
+    "j_rocket": "Earn $1 at end of round. Payout increases by $2 when Boss Blind is defeated",
+    "j_gift": "Adds $1 of sell value to every Joker and Consumable card at end of round",
+    "j_reserved_parking": "Each face card held in hand has a 1 in 2 chance to give $1",
+    "j_midas_mask": "All played face cards become Gold cards when scored",
+    "j_trading": "If first discard of round has only 1 card, destroy it and earn $3",
+    "j_ticket": "Played Gold cards earn $4 when scored",
+    "j_matador": "Earn $8 if played hand triggers the Boss Blind ability",
+    "j_satellite": "Earn $1 at end of round per unique Planet card used this run",
     "j_abstract": "+3 Mult for each Joker card currently owned",
     "j_raised_fist": "Adds double the rank of lowest ranked card held in hand to Mult",
     "j_shoot_the_moon": "Each Queen held in hand gives +13 Mult",
     "j_spare_trousers": "Gains +2 Mult if played hand contains a Two Pair",
+    "j_trousers": "Gains +2 Mult if played hand contains a Two Pair",
 }
 
 HYBRID_JOKER_IDENTIFIERS: set[str] = {
@@ -375,37 +427,71 @@ def clean_joker_desc(
     x_mult: float = 1.0,
     mult: int = 0,
     chips: int = 0,
+    target_suit: str | None = None,
+    target_rank: str | None = None,
+    target_hand: str | None = None,
 ) -> str:
     """Sanitizes raw Balatro localization strings, eliminating raw '#1#', '#2#' placeholders
-    and crystalizing base vs scaled values for xMult / scaling jokers."""
+    and crystalizing base vs scaled values and rotating targets for Jokers."""
     k = (key or "").strip().lower()
     lbl = (label or "").strip().lower()
 
-    # Match by key or label substring
+    # Match by key or longest label substring
     clean_base: str | None = None
     if k in KNOWN_JOKER_CLEAN_DESCS:
         clean_base = KNOWN_JOKER_CLEAN_DESCS[k]
+    elif lbl == "joker":
+        clean_base = KNOWN_JOKER_CLEAN_DESCS["j_joker"]
     else:
-        for jk, desc in KNOWN_JOKER_CLEAN_DESCS.items():
+        for jk, desc in sorted(KNOWN_JOKER_CLEAN_DESCS.items(), key=lambda x: len(x[0]), reverse=True):
+            if jk == "j_joker":
+                continue
             core_name = jk.replace("j_", "").replace("_", " ")
-            if core_name in lbl or (lbl and lbl in core_name):
+            if core_name and (core_name in lbl or (lbl and len(lbl) > 3 and lbl in core_name)):
                 clean_base = desc
                 break
 
     if clean_base:
+        if target_suit and target_rank:
+            clean_base += f" [🎯 Active Target: {target_rank} of {target_suit}]"
+        elif target_suit:
+            clean_base += f" [🎯 Active Target Suit: {target_suit}]"
+        elif target_rank:
+            clean_base += f" [🎯 Active Target Rank: {target_rank}]"
+        elif target_hand:
+            clean_base += f" [🎯 Active Target Hand: {target_hand}]"
+
         if x_mult > 1.05:
             if "⚠️" in clean_base:
                 clean_base = re.sub(r"\(⚠️[^)]+\)", f"(🔥 CURRENTLY SCALED: X{x_mult:g} Mult!)", clean_base)
-            else:
+            elif f"X{x_mult:g}" not in clean_base:
                 clean_base += f" (🔥 CURRENTLY: X{x_mult:g} Mult)"
-        elif mult > 0 and ("tarot" in clean_base.lower() or "reroll" in clean_base.lower() or "supernova" in clean_base.lower()):
-            clean_base += f" (Currently: +{mult} Mult)"
-        elif chips > 0 and ("ice cream" in lbl or "popcorn" in lbl):
-            clean_base = re.sub(r"\+\d+ Chips", f"+{chips} Chips", clean_base)
+        if mult > 0 and (
+            k in ("j_green_joker", "j_ride_the_bus", "j_trousers", "j_spare_trousers", "j_red_card", "j_fortune_teller", "j_flash", "j_erosion", "j_abstract", "j_swashbuckler", "j_bootstraps", "j_popcorn", "j_supernova")
+            or any(w in lbl for w in ("green joker", "ride the bus", "spare trousers", "red card", "fortune teller", "flash card", "erosion", "abstract", "swashbuckler", "bootstraps", "popcorn", "supernova"))
+        ):
+            if "popcorn" in lbl or k == "j_popcorn":
+                clean_base = re.sub(r"\+\d+ Mult", f"+{mult} Mult", clean_base)
+            else:
+                clean_base += f" (Currently: +{mult} Mult)"
+        if chips > 0 and (
+            k in ("j_runner", "j_castle", "j_square", "j_wee", "j_stone", "j_stone_joker", "j_blue_joker", "j_bull", "j_banner", "j_ice_cream")
+            or any(w in lbl for w in ("runner", "castle", "square joker", "wee joker", "stone joker", "blue joker", "bull", "banner", "ice cream"))
+        ):
+            if "ice cream" in lbl or k == "j_ice_cream":
+                clean_base = re.sub(r"\+\d+ Chips", f"+{chips} Chips", clean_base)
+            else:
+                clean_base += f" (Currently: +{chips} Chips)"
         return clean_base
 
     # Fallback: clean raw_desc with regex
     desc = raw_desc or ""
+    if target_suit:
+        desc = desc.replace("#2#", str(target_suit))
+    if target_rank:
+        desc = desc.replace("#2#", str(target_rank))
+    if target_hand:
+        desc = desc.replace("#2#", str(target_hand))
     desc = re.sub(r"\(Сейчас:[^)]*x#\d+#[^)]*\)", "(Сейчас: базовый множ. X1.0 unscaled)", desc, flags=re.I)
     desc = re.sub(r"[Xx]#\d+#", "X1.0 (unscaled)", desc)
     desc = re.sub(r"\+#\d+#", "+Bonus", desc)
@@ -453,6 +539,9 @@ def format_joker_compact(index: int, joker: JokerModel) -> str:
         x_mult=getattr(joker, "x_mult", 1.0),
         mult=getattr(joker, "mult", 0),
         chips=getattr(joker, "chips", 0),
+        target_suit=getattr(joker, "target_suit", None),
+        target_rank=getattr(joker, "target_rank", None),
+        target_hand=getattr(joker, "target_hand", None),
     )
 
     return (
@@ -913,7 +1002,46 @@ def get_upcoming_blind_target(state: GameState) -> tuple[str, int]:
         for b in state.ante_blinds:
             if b.status in ("Select", "Upcoming"):
                 return b.name, b.chips
+    if state.blind and state.blind.upcoming_boss_name:
+        bn = (state.blind.name or "").lower()
+        if "big" in bn or "большой" in bn:
+            base_ante_targets = {1: 600, 2: 1500, 3: 4000, 4: 5000, 5: 15000, 6: 30000, 7: 60000, 8: 100000}
+            return state.blind.upcoming_boss_name, base_ante_targets.get(state.ante, 5000)
     return "Next Blind", (state.target_score or 3000)
+
+
+def get_boss_eval_state(state: GameState) -> tuple[GameState, str, int]:
+    """Returns a GameState configured as if actively fighting the current Ante's Boss Blind,
+    so Boss debuffs (e.g. The Flint -50% base, The Plant face debuff, suit debuffs) are applied."""
+    boss_name = ""
+    boss_chips = 0
+    boss_debuff = None
+    if state.blind and state.blind.is_boss:
+        return state, state.blind.name, state.target_score
+    if state.ante_blinds:
+        for b in state.ante_blinds:
+            if b.type == "Boss":
+                boss_name = b.name
+                boss_chips = b.chips
+                boss_debuff = b.debuff_rule
+                break
+    if not boss_name and state.blind and state.blind.upcoming_boss_name:
+        boss_name = state.blind.upcoming_boss_name
+        boss_debuff = state.blind.upcoming_boss_debuff
+    if boss_chips <= 0:
+        base_ante_targets = {1: 600, 2: 1500, 3: 4000, 4: 5000, 5: 15000, 6: 30000, 7: 60000, 8: 100000}
+        boss_chips = base_ante_targets.get(state.ante, 5000)
+    if not boss_name:
+        return state, "Boss Blind", boss_chips
+    sim_blind = state.blind.model_copy(
+        update={
+            "name": boss_name,
+            "chips_needed": boss_chips,
+            "is_boss": True,
+            "debuff_rule": boss_debuff or state.blind.upcoming_boss_debuff,
+        }
+    )
+    return state.model_copy(update={"blind": sim_blind, "target_score": boss_chips}), boss_name, boss_chips
 
 
 def project_shop_joker_impact(
@@ -923,8 +1051,13 @@ def project_shop_joker_impact(
     scoring_engine: BalatroScoringEngine,
 ) -> str | None:
     """Calculates deterministic scoring impact of buying this shop Joker."""
-    sample_cards = scoring_engine.get_representative_hand(primary_hand, state)
-    current_res = scoring_engine.calculate_expected_hand_score(sample_cards, hand_type=primary_hand, state=state)
+    next_blind_name, target_chips = get_upcoming_blind_target(state)
+    boss_eval_state, boss_name, _ = get_boss_eval_state(state)
+    is_next_boss = bool(boss_name and next_blind_name.lower() == boss_name.lower())
+    eval_base_state = boss_eval_state if is_next_boss else state
+
+    sample_cards = scoring_engine.get_representative_hand(primary_hand, eval_base_state)
+    current_res = scoring_engine.calculate_expected_hand_score(sample_cards, hand_type=primary_hand, state=eval_base_state)
     curr_score = max(1, current_res.score)
 
     sim_joker = JokerModel(
@@ -935,13 +1068,12 @@ def project_shop_joker_impact(
         edition=getattr(item, "edition", None),
     )
 
-    next_blind_name, target_chips = get_upcoming_blind_target(state)
     hands_curr = math.ceil(target_chips / curr_score)
     is_negative = (getattr(item, "edition", None) or "").lower() == "negative"
 
     # Case A: Open slot available OR Negative edition (takes 0 slots)
     if len(state.jokers) < state.max_jokers or is_negative:
-        st = state.model_copy(update={"jokers": state.jokers + [sim_joker]})
+        st = eval_base_state.model_copy(update={"jokers": state.jokers + [sim_joker]})
         new_res = scoring_engine.calculate_expected_hand_score(sample_cards, hand_type=primary_hand, state=st)
         new_score = new_res.score
         delta = new_score - curr_score
@@ -965,7 +1097,7 @@ def project_shop_joker_impact(
 
     for oj in non_eternal:
         test_jokers = [j for j in state.jokers if j.id != oj.id] + [sim_joker]
-        st = state.model_copy(update={"jokers": test_jokers})
+        st = eval_base_state.model_copy(update={"jokers": test_jokers})
         res = scoring_engine.calculate_expected_hand_score(sample_cards, hand_type=primary_hand, state=st)
         if res.score > best_score:
             best_score = res.score
@@ -1081,46 +1213,65 @@ def get_boss_readiness_alert(state: GameState, primary_hand: str, primary_hand_s
 
     n = boss_name.lower()
     is_needle = "needle" in n or "игла" in n
+    is_flint = "flint" in n or "кремень" in n
 
-    if is_needle:
-        if primary_hand_score < boss_chips:
-            deficit = boss_chips - primary_hand_score
+    boss_eval_state, _, _ = get_boss_eval_state(state)
+    scoring_engine = BalatroScoringEngine()
+    sample_cards = scoring_engine.get_representative_hand(primary_hand, boss_eval_state)
+    boss_res = scoring_engine.calculate_expected_hand_score(sample_cards, hand_type=primary_hand, state=boss_eval_state)
+    eff_boss_score = max(1, boss_res.score)
+
+    if is_flint:
+        hands_req = math.ceil(boss_chips / eff_boss_score)
+        avail_hands = max(1, state.hands_left if state.hands_left > 0 else 4)
+        status_icon = "🚨 **CRITICAL BOSS DEFICIT**" if hands_req > avail_hands else "⚠️ **BOSS READINESS: THE FLINT**"
+        alerts.append(
+            f"> {status_icon} (**The Flint / Кремень** — Ante {state.ante} Boss, Target: **{boss_chips:,} chips**):\n"
+            f">   • **Halved Base Stats**: The Flint halves base poker hand Chips & Mult! Your '{primary_hand}' drops from ~{primary_hand_score:,} to **~{eff_boss_score:,} chips/hand** against The Flint!\n"
+            f">   • **Projected Pace**: Requires **~{hands_req} hands** to clear {boss_chips:,} chips ({avail_hands} hands available; max 4-hand ceiling vs Flint is **~{eff_boss_score * avail_hands:,} chips**).\n"
+            f">   • **Shop Priority**: Flat +Chips and +Mult Jokers (and xMult) are NOT halved by The Flint — buy scoring Jokers now if {eff_boss_score * avail_hands:,} < {boss_chips:,}!"
+        )
+    elif is_needle:
+        if eff_boss_score < boss_chips:
+            deficit = boss_chips - eff_boss_score
             alerts.append(
                 f"> ℹ️ **BOSS READINESS: THE NEEDLE (Ante {state.ante} Boss)**:\n"
                 f">   • Restriction: The Needle allows **ONLY 1 HAND TOTAL** (Must score {boss_chips:,} chips in 1 hit)!\n"
-                f">   • Current Output: Your primary hand ('{primary_hand}') yields at most **~{primary_hand_score:,} chips** "
+                f">   • Current Output: Your primary hand ('{primary_hand}') yields at most **~{eff_boss_score:,} chips** "
                 f"(Leaves a **{deficit:,} deficit** vs {boss_chips:,} needed).\n"
                 f">   • Shop Priority: Options to increase single-hand output include Planet cards, +Mult, or xMult."
             )
         else:
-            margin = primary_hand_score - boss_chips
+            margin = eff_boss_score - boss_chips
             alerts.append(
                 f"> 🛡️ **BOSS READINESS: THE NEEDLE (Ante {state.ante} Boss)**: "
-                f"Target: {boss_chips:,} in 1 hand. Your '{primary_hand}' reaches **~{primary_hand_score:,} chips** "
+                f"Target: {boss_chips:,} in 1 hand. Your '{primary_hand}' reaches **~{eff_boss_score:,} chips** "
                 f"(Safety margin: +{margin:,} chips). Ready!"
             )
     elif "fish" in n or "рыб" in n:
-        hands_req = math.ceil(boss_chips / max(1, primary_hand_score))
+        hands_req = math.ceil(boss_chips / eff_boss_score)
         if hands_req >= 3:
             alerts.append(
                 f"> ⚠️ **BOSS READINESS: THE FISH (Ante {state.ante} Boss)**:\n"
-                f">   • Target: **{boss_chips:,} chips** | Primary Hand: **~{primary_hand_score:,} chips** (Requires **{hands_req} hands** to win).\n"
+                f">   • Target: **{boss_chips:,} chips** | Primary Hand: **~{eff_boss_score:,} chips** (Requires **{hands_req} hands** to win).\n"
                 f">   • 🚨 **HIGH RISK**: The Fish deals ALL replacement cards face-down after Hand 1! Requiring {hands_req} hands means playing mostly hidden cards in later hands!\n"
                 f">   • Shop Priority: Upgrade hand levels (Celestial Packs) or acquire xMult Jokers to win in 1–2 hands max before face-down cards accumulate!"
             )
         else:
             alerts.append(
                 f"> 🛡️ **BOSS READINESS: THE FISH (Ante {state.ante} Boss)**: "
-                f"Target: {boss_chips:,} chips. Your '{primary_hand}' reaches ~{primary_hand_score:,} chips "
+                f"Target: {boss_chips:,} chips. Your '{primary_hand}' reaches ~{eff_boss_score:,} chips "
                 f"({hands_req} hand{'s' if hands_req > 1 else ''} needed). Safe range to win before blind draws become critical."
             )
     else:
-        hands_req = math.ceil(boss_chips / max(1, primary_hand_score))
-        if hands_req > max(1, state.hands_left if state.hands_left > 0 else 4):
+        hands_req = math.ceil(boss_chips / eff_boss_score)
+        avail_hands = max(1, state.hands_left if state.hands_left > 0 else 4)
+        if hands_req > avail_hands or eff_boss_score < primary_hand_score:
+            debuff_note = f" (reduced from ~{primary_hand_score:,} by Boss debuff)" if eff_boss_score < primary_hand_score else ""
             alerts.append(
                 f"> ℹ️ **BOSS READINESS: {boss_name.upper()} (Ante {state.ante} Boss)**: "
-                f"Target: **{boss_chips:,} chips**. At your current pace (~{primary_hand_score:,}/hand), "
-                f"clearing the boss takes **~{hands_req} hands** (available: {max(1, state.hands_left if state.hands_left > 0 else 4)} hands)."
+                f"Target: **{boss_chips:,} chips**. At your Boss-adjusted pace (**~{eff_boss_score:,}/hand**{debuff_note}), "
+                f"clearing the boss takes **~{hands_req} hands** (available: {avail_hands} hands)."
             )
     return alerts
 
@@ -1573,6 +1724,18 @@ def serialize_game_state_to_markdown(
             lines.append(f"> 🚨 **BOSS RULE**: {boss_rule}")
         elif state.blind.debuff_rule:
             lines.append(f"> 🚨 **BOSS DEBUFF RULE**: `{state.blind.debuff_rule}`")
+        b_name_lc = (state.blind.name or "").lower()
+        played_types = [t for t in getattr(state, "played_hand_types_this_round", []) if t]
+        if ("mouth" in b_name_lc or "рот" in b_name_lc) and played_types:
+            lines.append(
+                f"> 🔒 **THE MOUTH LOCKED HAND TYPE**: You already played **{played_types[0]}** this round! "
+                f"ONLY **{played_types[0]}** will score points — ALL other hand types will score **0 CHIPS**!"
+            )
+        elif ("eye" in b_name_lc or "око" in b_name_lc) and played_types:
+            lines.append(
+                f"> 👁️ **THE EYE FORBIDDEN HAND TYPES**: Already played this round: **{', '.join(played_types)}**! "
+                f"Repeating any of these hand types will score **0 CHIPS**! Play a different hand type!"
+            )
     else:
         lines.append(f"- **Current Blind**: {state.blind.name} | Reward: ${state.blind.reward} (Standard Blind — No Boss Debuffs Active)")
         if state.blind.upcoming_boss_name:
@@ -1820,8 +1983,19 @@ def serialize_game_state_to_markdown(
     if not state.consumables:
         lines.append("_No consumables owned._")
     else:
+        target_tarot_keywords = (
+            "empress", "hierophant", "magician", "lovers", "chariot", "justice",
+            "devil", "tower", "strength", "death", "hanged", "star", "moon", "sun", "world",
+            "cryptid", "aura", "talisman", "deja vu", "trance", "medium",
+            "императрица", "иерофант", "маг", "влюблен", "колесница", "правосудие",
+            "дьявол", "башня", "сила", "смерть", "повешен", "звезда", "луна", "солнце", "мир",
+        )
         for c in state.consumables:
-            lines.append(f"- `{c.id}`: **{c.label}** ({c.card_type}) - {c.desc}")
+            c_lbl_lc = (c.label or "").lower()
+            shop_warn = ""
+            if state.stage == "SHOP" and any(kw in c_lbl_lc for kw in target_tarot_keywords):
+                shop_warn = " **[⚠️ REQUIRES HAND CARDS — Cannot use in bare SHOP! Wait for SELECTING_HAND or open an Arcana/Standard Pack first]**"
+            lines.append(f"- `{c.id}`: **{c.label}** ({c.card_type}) - {c.desc}{shop_warn}")
 
         planets = [c for c in state.consumables if c.card_type == "Planet"]
         if planets:
@@ -1863,9 +2037,11 @@ def serialize_game_state_to_markdown(
     if state.stage in ("SELECTING_HAND", "PLAYING_HAND", "OPENING_BOOSTER"):
         is_the_mark = bool(state.blind.is_boss and any(k in (state.blind.name or "").lower() for k in ("mark", "знак")))
         is_the_fish = bool(state.blind.is_boss and any(k in (state.blind.name or "").lower() for k in ("fish", "рыб")))
+        upcoming_or_active_boss = (state.blind.name if state.blind.is_boss else (state.blind.upcoming_boss_name or "")).lower()
+        is_pillar_ante = any(k in upcoming_or_active_boss for k in ("pillar", "столп"))
         hand_title = "Current Hand" if state.stage != "OPENING_BOOSTER" else "Current Hand (Target Candidates for Tarots / Spectrals)"
         lines.append(f"\n#### {hand_title} ({len(state.hand)} cards):")
-        card_chunks = [format_card_compact(c, is_the_mark=is_the_mark) for c in state.hand]
+        card_chunks = [format_card_compact(c, is_the_mark=is_the_mark, is_pillar_ante=is_pillar_ante) for c in state.hand]
         lines.append(" ".join(card_chunks))
 
         has_wild = any(c.enhancement == "Wild" or c.suit == "Wild" for c in state.hand)
@@ -1887,7 +2063,7 @@ def serialize_game_state_to_markdown(
                 else:
                     lines.extend(format_draw_profile_intel(state, face_down_count, is_fish=is_the_fish))
 
-            # Active Boss debuff audit for The Pillar
+            # Active or Pre-Boss debuff audit for The Pillar
             if state.blind.is_boss and any(k in (state.blind.name or "").lower() for k in ("pillar", "столп")):
                 debuffed_in_hand = [c for c in state.hand if c.debuffed]
                 clean_in_hand = [c for c in state.hand if not c.debuffed and not c.face_down]
@@ -1897,6 +2073,16 @@ def serialize_game_state_to_markdown(
                     f"> 🏛️ **THE PILLAR AUDIT**: Hand has {len(clean_in_hand)} FRESH card(s) and {len(debuffed_in_hand)} DEBUFFED card(s)!\n"
                     f">   • Fresh/Clean cards: [{clean_str}]\n"
                     f">   • ⚠️ Debuffed cards (give 0 chips/mult, do NOT build hands around them!): [{deb_str}]"
+                )
+            elif not state.blind.is_boss and is_pillar_ante:
+                played_in_hand = [c for c in state.hand if getattr(c, "played_this_ante", False)]
+                fresh_in_hand = [c for c in state.hand if not getattr(c, "played_this_ante", False) and not c.face_down]
+                fresh_deck = sum(1 for dc in (state.deck_summary.cards if state.deck_summary else []) if not getattr(dc, "played_this_ante", False))
+                played_deck = sum(1 for dc in (state.deck_summary.cards if state.deck_summary else []) if getattr(dc, "played_this_ante", False))
+                lines.append(
+                    f"> 🏛️ **THE PILLAR FRESHNESS TRACKER (Upcoming Boss: {state.blind.upcoming_boss_name})**:\n"
+                    f">   • Hand: **{len(fresh_in_hand)} FRESH** vs **{len(played_in_hand)} ALREADY PLAYED THIS ANTE** | Draw Pile: **{fresh_deck} fresh** / {played_deck} already played.\n"
+                    f">   • 💡 Any card you **PLAY** now will be debuffed on The Pillar (discarded cards stay FRESH!). Clear this blind first, and prefer playing already-used (`🏛️PLAYED_THIS_ANTE`) or low cards when possible."
                 )
 
             remaining_score = max(0, state.target_score - state.current_score)
@@ -2097,8 +2283,16 @@ def serialize_game_state_to_markdown(
             scoring_engine = BalatroScoringEngine()
             primary_hand = get_primary_hand_type(state)
             next_blind_name, target_chips = get_upcoming_blind_target(state)
-            sample_primary = scoring_engine.get_representative_hand(primary_hand, state)
-            base_primary_res = scoring_engine.calculate_expected_hand_score(sample_primary, hand_type=primary_hand, state=state)
+            boss_eval_state, boss_name_eval, _ = get_boss_eval_state(state)
+            is_next_boss = bool(boss_name_eval and next_blind_name.lower() == boss_name_eval.lower())
+            eval_state_for_next = boss_eval_state if is_next_boss else state
+            sample_primary = scoring_engine.get_representative_hand(primary_hand, eval_state_for_next)
+            base_primary_res = scoring_engine.calculate_expected_hand_score(sample_primary, hand_type=primary_hand, state=eval_state_for_next)
+            normal_primary_res = (
+                scoring_engine.calculate_expected_hand_score(sample_primary, hand_type=primary_hand, state=state)
+                if is_next_boss
+                else base_primary_res
+            )
 
             hands_count = state.hands_left if state.hands_left > 0 else 4
             max_round_pot = base_primary_res.score * hands_count
@@ -2113,7 +2307,7 @@ def serialize_game_state_to_markdown(
                 f"(~{base_primary_res.score:,} score/hand) | Target to Beat: **{next_blind_name}** ({target_chips:,} chips){pot_str}"
             )
 
-            boss_alerts = get_boss_readiness_alert(state, primary_hand, base_primary_res.score)
+            boss_alerts = get_boss_readiness_alert(state, primary_hand, normal_primary_res.score)
             for ba in boss_alerts:
                 lines.append(ba)
 

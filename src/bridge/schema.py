@@ -22,6 +22,7 @@ class CardModel(BaseModel):
     debuffed: bool = Field(default=False, description="True if card is debuffed by Boss Blind")
     highlighted: bool = Field(default=False, description="True if currently selected in hand")
     face_down: bool = Field(default=False, description="True if facedown due to blind/curse")
+    played_this_ante: bool = Field(default=False, description="True if card was already played in this Ante (debuffed by The Pillar)")
     revealed_name: str | None = Field(default=None, description="Actual card identity for human audit report only")
 
     @field_validator("suit", mode="before")
@@ -93,6 +94,7 @@ class JokerModel(BaseModel):
     edition: str | None = Field(default=None, description="Joker edition (Foil, Holographic, Polychrome, Negative)")
     target_suit: str | None = Field(default=None, description="Active rotating target suit (e.g. for Ancient Joker, Castle, Idol)")
     target_rank: str | None = Field(default=None, description="Active rotating target rank (e.g. for Mail-In Rebate, Idol)")
+    target_hand: str | None = Field(default=None, description="Active rotating target poker hand (e.g. for To Do List)")
 
     @field_validator("rarity", mode="before")
     @classmethod
@@ -337,6 +339,9 @@ class GameState(BaseModel):
     shop: ShopModel | None = Field(default=None, description="Available shop items if in shop phase")
     deck_remaining: int = Field(default=52, description="Cards remaining in the draw pile")
     poker_hands: list[PokerHandModel] = Field(default_factory=list, description="All discovered poker hand levels and stats")
+    played_hand_types_this_round: list[str] = Field(
+        default_factory=list, description="Poker hand types already played in the current round (for The Mouth / The Eye)"
+    )
     deck_summary: DeckSummaryModel | None = Field(default=None, description="Detailed breakdown of remaining draw pile")
     interest_cap: int = Field(default=25, description="Current interest threshold cap ($25, $50 with Seed Money, $100 with Money Tree)")
     vouchers: list[str] = Field(default_factory=list, description="All vouchers owned/redeemed in this run")

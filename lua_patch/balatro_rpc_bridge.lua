@@ -493,6 +493,7 @@ function BalatroBridge.get_game_state()
                     debuffed = card.debuff or false,
                     highlighted = card.highlighted or false,
                     face_down = is_face_down,
+                    played_this_ante = (card.ability and card.ability.played_this_ante) or false,
                     revealed_name = nil
                 })
             end
@@ -568,6 +569,7 @@ function BalatroBridge.get_game_state()
                 local rarity = (type(raw_rarity) == "number" and rarity_names[raw_rarity]) or (type(raw_rarity) == "string" and raw_rarity) or "Common"
                 local target_suit = nil
                 local target_rank = nil
+                local target_hand = nil
                 if j.ability then
                     if j.ability.extra and type(j.ability.extra) == "table" then
                         target_suit = j.ability.extra.suit
@@ -575,6 +577,19 @@ function BalatroBridge.get_game_state()
                     end
                     if not target_suit and j.ability.suit then target_suit = j.ability.suit end
                     if not target_rank and j.ability.rank then target_rank = j.ability.rank end
+                    if j.ability.to_do_poker_hand then target_hand = tostring(j.ability.to_do_poker_hand) end
+                end
+                if G.GAME and G.GAME.current_round then
+                    if j_key == "j_ancient" and G.GAME.current_round.ancient_card then
+                        target_suit = G.GAME.current_round.ancient_card.suit or target_suit
+                    elseif j_key == "j_castle" and G.GAME.current_round.castle_card then
+                        target_suit = G.GAME.current_round.castle_card.suit or target_suit
+                    elseif j_key == "j_mail" and G.GAME.current_round.mail_card then
+                        target_rank = tostring(G.GAME.current_round.mail_card.rank or target_rank or "")
+                    elseif j_key == "j_idol" and G.GAME.current_round.idol_card then
+                        target_suit = G.GAME.current_round.idol_card.suit or target_suit
+                        target_rank = tostring(G.GAME.current_round.idol_card.rank or target_rank or "")
+                    end
                 end
 
                 local desc_txt = get_card_desc(j)
@@ -584,7 +599,10 @@ function BalatroBridge.get_game_state()
                 if target_rank and desc_txt:find("#2#") then
                     desc_txt = desc_txt:gsub("#2#", tostring(target_rank))
                 end
-                if target_suit and desc_txt:find("#1#") and j.config and j.config.center and j.config.center.key == "j_ancient" then
+                if target_hand and desc_txt:find("#2#") then
+                    desc_txt = desc_txt:gsub("#2#", tostring(target_hand))
+                end
+                if target_suit and desc_txt:find("#1#") and j_key == "j_ancient" then
                     desc_txt = desc_txt:gsub("#1#", "1.5")
                 end
 
@@ -602,6 +620,7 @@ function BalatroBridge.get_game_state()
                     edition = ed_type,
                     target_suit = target_suit,
                     target_rank = target_rank,
+                    target_hand = target_hand,
                     x_mult = (j.ability and (j.ability.x_mult or j.ability.Xmult)) or 1.0,
                     mult = (j.ability and j.ability.mult) or 0,
                     chips = (j.ability and (j.ability.chips or j.ability.t_chips)) or 0,
@@ -882,8 +901,12 @@ function BalatroBridge.get_game_state()
 
     -- 3. Extract poker hands levels and scoring
     local poker_hands = {}
+    local played_hand_types_this_round = {}
     if G.GAME and G.GAME.hands then
         for hand_name, hand_info in pairs(G.GAME.hands) do
+            if hand_info.played_this_round and hand_info.played_this_round > 0 then
+                table.insert(played_hand_types_this_round, hand_name)
+            end
             if hand_info.visible then
                 table.insert(poker_hands, {
                     name = hand_name,
@@ -945,7 +968,8 @@ function BalatroBridge.get_game_state()
                     nominal = c.base and c.base.nominal or 0,
                     enhancement = enh,
                     edition = ed_type,
-                    seal = seal
+                    seal = seal,
+                    played_this_ante = (c.ability and c.ability.played_this_ante) or false
                 })
 
                 if enh or ed_type or seal then
@@ -1008,7 +1032,7 @@ function BalatroBridge.get_game_state()
     end
 
     return {
-        bridge_version = "v1.9.14",
+        bridge_version = "v1.9.15",
         stage = stage,
         can_reroll_boss = can_reroll_boss,
         ante = G.GAME.round_resets and G.GAME.round_resets.ante or 1,
@@ -1045,6 +1069,7 @@ function BalatroBridge.get_game_state()
         shop = shop_data,
         deck_remaining = G.deck and #G.deck.cards or 52,
         poker_hands = poker_hands,
+        played_hand_types_this_round = played_hand_types_this_round,
         deck_summary = deck_summary,
         interest_cap = (G.GAME and G.GAME.interest_cap) or 25,
         vouchers = (function()

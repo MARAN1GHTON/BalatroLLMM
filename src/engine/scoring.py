@@ -174,6 +174,99 @@ class BalatroScoringEngine:
             # Full House, Flush, Straight, Straight Flush, Five of a Kind, Flush House, Flush Five
             return list(combo)
 
+    @staticmethod
+    def _resolve_effective_jokers(active_jokers: Sequence[Any]) -> list[Any]:
+        """Resolves Blueprint (copies Joker to the right) and Brainstorm (copies leftmost Joker)."""
+        if not active_jokers:
+            return []
+        resolved = [j.model_copy(deep=True) if hasattr(j, "model_copy") else j for j in active_jokers]
+        n = len(resolved)
+        for _ in range(min(n, 5)):
+            changed = False
+            for idx, j in enumerate(resolved):
+                k = (getattr(j, "key", "") or "").lower()
+                lbl = (getattr(j, "label", "") or "").lower()
+                target = None
+                if k == "j_blueprint" or "blueprint" in lbl or "чертеж" in lbl or "чертёж" in lbl:
+                    if idx + 1 < n:
+                        target = resolved[idx + 1]
+                elif k == "j_brainstorm" or "brainstorm" in lbl or "мозговой штурм" in lbl:
+                    if idx > 0:
+                        target = resolved[0]
+                if target is not None:
+                    tk = (getattr(target, "key", "") or "").lower()
+                    tlbl = (getattr(target, "label", "") or "").lower()
+                    if tk not in ("j_blueprint", "j_brainstorm") and "blueprint" not in tlbl and "brainstorm" not in tlbl:
+                        if hasattr(j, "model_copy") and hasattr(target, "model_copy"):
+                            copy_j = target.model_copy(deep=True)
+                            copy_j.id = j.id
+                            copy_j.edition = j.edition
+                            copy_j.order = j.order
+                            resolved[idx] = copy_j
+                            changed = True
+            if not changed:
+                break
+        return resolved
+
+    def optimize_card_order_for_scoring(
+        self,
+        combo: Sequence[CardModel],
+        hand_type: str | None = None,
+        state: GameState | None = None,
+    ) -> list[CardModel]:
+        """Orders played cards left-to-right to maximize Phase-1 scoring (e.g. placing the Photograph
+        face card or Glass card at index 0 when Hanging Chad is active, or placing +Mult cards before
+        XMult cards when Hanging Chad is not active)."""
+        if len(combo) <= 1:
+            return list(combo)
+        if hand_type is None:
+            hand_type, _, _ = self.identify_poker_hand(combo)
+
+        active_jokers = self._resolve_effective_jokers([j for j in (state.jokers if state else []) if not j.debuffed])
+        has_splash = any((j.key or "").lower() == "j_splash" or "splash" in (j.label or "").lower() for j in active_jokers)
+        has_chad = any((j.key or "").lower() == "j_hanging_chad" or "hanging chad" in (j.label or "").lower() or "chad" in (j.label or "").lower() for j in active_jokers)
+        has_photo = any((j.key or "").lower() == "j_photograph" or "photograph" in (j.label or "").lower() for j in active_jokers)
+        has_triboulet = any((j.key or "").lower() == "j_triboulet" or "triboulet" in (j.label or "").lower() for j in active_jokers)
+        has_pareidolia = any((j.key or "").lower() == "j_pareidolia" or "pareidolia" in (j.label or "").lower() for j in active_jokers)
+
+        scoring_cards = list(combo) if has_splash else self.get_scoring_cards(combo, hand_type)
+        scoring_ids = {c.id for c in scoring_cards}
+        non_scoring = [c for c in combo if c.id not in scoring_ids]
+
+        def card_metrics(c: CardModel) -> tuple[float, float, int]:
+            if c.debuffed:
+                return (1.0, 0.0, 0)
+            c_rank = c.effective_rank if hasattr(c, "effective_rank") else c.rank
+            c_nom = c.effective_nominal if hasattr(c, "effective_nominal") else c.nominal
+            is_face = has_pareidolia or (c.is_face_card if hasattr(c, "is_face_card") else c_rank in ("Jack", "Queen", "King"))
+            xm = float(c.x_mult) if c.x_mult > 1.0 else 1.0
+            if c.edition and ("poly" in c.edition.lower() or "polychrome" in c.edition.lower()):
+                xm *= 1.5
+            if is_face and has_photo:
+                xm *= 2.0
+            if c_rank in ("King", "Queen") and has_triboulet:
+                xm *= 2.0
+            m_add = float(c.mult_bonus)
+            if c.edition and ("holo" in c.edition.lower() or "holographic" in c.edition.lower()):
+                m_add += 10.0
+            c_add = int(c_nom + c.chip_bonus + (50 if (c.edition and "foil" in c.edition.lower()) else 0))
+            return (xm, m_add, c_add)
+
+        if has_chad and scoring_cards:
+            # Put the card that benefits most from +2 retriggers at index 0
+            best_first = max(scoring_cards, key=lambda c: (card_metrics(c)[0], card_metrics(c)[1], card_metrics(c)[2]))
+            rest = [c for c in scoring_cards if c.id != best_first.id]
+            # Order rest so +Mult cards come before XMult cards
+            rest.sort(key=lambda c: (1 if card_metrics(c)[0] > 1.0 else 0, -card_metrics(c)[1], card_metrics(c)[0]))
+            return [best_first] + rest + non_scoring
+        else:
+            # Order so non-XMult (+Mult) cards trigger before XMult cards
+            ordered_scoring = sorted(
+                scoring_cards,
+                key=lambda c: (1 if card_metrics(c)[0] > 1.0 else 0, -card_metrics(c)[1], -card_metrics(c)[2]),
+            )
+            return ordered_scoring + non_scoring
+
     def calculate_expected_hand_score(
         self,
         cards: Sequence[CardModel],
@@ -189,6 +282,58 @@ class BalatroScoringEngine:
             hand_type, def_chips, def_mult = self.identify_poker_hand(cards)
         else:
             def_chips, def_mult = POKER_HAND_BASE.get(hand_type, (5, 1))
+
+        # Boss Blind 0-score rule checks (The Mouth, The Eye, The Psychic)
+        is_boss_blind = bool(
+            state
+            and state.blind
+            and (
+                state.blind.is_boss
+                or (
+                    state.blind.name
+                    and state.blind.name.lower()
+                    not in ("small blind", "big blind", "малый блайнд", "большой блайнд")
+                )
+            )
+        )
+        boss_name = (state.blind.name or "").lower() if is_boss_blind else ""
+        boss_debuff_lc = (state.blind.debuff_rule or "").lower() if is_boss_blind else ""
+        is_disabled = "disabled" in boss_debuff_lc
+
+        if is_boss_blind and not is_disabled:
+            played_types = [t for t in getattr(state, "played_hand_types_this_round", []) if t]
+            played_types_lc = [t.lower() for t in played_types]
+            if ("mouth" in boss_name or "рот" in boss_name) and played_types_lc and hand_type.lower() not in played_types_lc:
+                locked = played_types[0]
+                return HandEvaluationResult(
+                    hand_type=hand_type,
+                    cards=list(cards),
+                    chips=0,
+                    mult=0,
+                    score=0,
+                    breakdown=[f"⛔ BLOCKED BY THE MOUTH (Locked to '{locked}')"],
+                    threshold_status=f"⛔ [0 SCORE: The Mouth only allows '{locked}' this round!]",
+                )
+            if ("eye" in boss_name or "око" in boss_name) and hand_type.lower() in played_types_lc:
+                return HandEvaluationResult(
+                    hand_type=hand_type,
+                    cards=list(cards),
+                    chips=0,
+                    mult=0,
+                    score=0,
+                    breakdown=[f"⛔ BLOCKED BY THE EYE ('{hand_type}' already played this round)"],
+                    threshold_status=f"⛔ [0 SCORE: The Eye forbids repeating '{hand_type}'!]",
+                )
+            if ("psychic" in boss_name or "экстрасенс" in boss_name) and len(cards) < 5:
+                return HandEvaluationResult(
+                    hand_type=hand_type,
+                    cards=list(cards),
+                    chips=0,
+                    mult=0,
+                    score=0,
+                    breakdown=["⛔ BLOCKED BY THE PSYCHIC (Must play 5 cards!)"],
+                    threshold_status="⛔ [0 SCORE: The Psychic requires playing 5 cards!]",
+                )
 
         base_chips = def_chips
         base_mult = def_mult
@@ -207,25 +352,29 @@ class BalatroScoringEngine:
         breakdown: list[str] = [f"Base {base_chips}x{base_mult}"]
 
         # Boss Blind debuff check on Base Chips/Mult
-        boss_name = (state.blind.name or "").lower() if (state and state.blind and state.blind.is_boss) else ""
-        if "flint" in boss_name or "кремень" in boss_name:
+        if not is_disabled and ("flint" in boss_name or "кремень" in boss_name):
             base_chips = max(1, base_chips // 2)
             base_mult = max(1, base_mult // 2)
             breakdown.append("TheFlint: -50%Base")
 
         # Boss card debuff filters
-        is_plant = "plant" in boss_name or "растение" in boss_name
-        is_club_boss = "club" in boss_name or "треф" in boss_name
-        is_goad = "goad" in boss_name or "пик" in boss_name
-        is_window = "window" in boss_name or "буб" in boss_name
-        is_head = "head" in boss_name or "черв" in boss_name
+        is_plant = not is_disabled and ("plant" in boss_name or "растение" in boss_name)
+        is_club_boss = not is_disabled and ("club" in boss_name or "треф" in boss_name)
+        is_goad = not is_disabled and ("goad" in boss_name or "пик" in boss_name)
+        is_window = not is_disabled and ("window" in boss_name or "буб" in boss_name)
+        is_head = not is_disabled and ("head" in boss_name or "черв" in boss_name)
+
+        raw_active_jokers = [j for j in (state.jokers if state else []) if not j.debuffed]
+        active_jokers = self._resolve_effective_jokers(raw_active_jokers)
+        has_pareidolia = any((j.key or "").lower() == "j_pareidolia" or "pareidolia" in (j.label or "").lower() for j in active_jokers)
 
         def is_card_debuffed(c: CardModel) -> bool:
             if c.debuffed:
                 return True
             c_rank = c.effective_rank if hasattr(c, "effective_rank") else c.rank
             c_suit = c.effective_suit if hasattr(c, "effective_suit") else c.suit
-            if is_plant and (c.is_face_card if hasattr(c, "is_face_card") else c_rank in ("Jack", "Queen", "King")):
+            is_f = has_pareidolia or (c.is_face_card if hasattr(c, "is_face_card") else c_rank in ("Jack", "Queen", "King"))
+            if is_plant and is_f:
                 return True
             if is_club_boss and (c_suit == "Clubs" or c.enhancement == "Wild"):
                 return True
@@ -237,29 +386,41 @@ class BalatroScoringEngine:
                 return True
             return False
 
-        active_jokers = [j for j in (state.jokers if state else []) if not j.debuffed]
-        has_splash = any(j.key == "j_splash" or "splash" in j.label.lower() for j in active_jokers)
+        has_splash = any((j.key or "").lower() == "j_splash" or "splash" in (j.label or "").lower() for j in active_jokers)
         if has_splash:
             scoring_cards = list(cards)
         else:
             scoring_cards = self.get_scoring_cards(cards, hand_type)
 
-        total_chips = base_chips
+        total_chips = float(base_chips)
         total_mult = float(base_mult)
-        x_mult_factor = 1.0
 
         card_chips_added = 0
         card_mult_added = 0
         # Track first scored face card ID for Photograph (triggers on base scoring and all its retriggers)
         first_face_card_id: str | None = None
 
-        # Check retrigger Jokers
-        has_hack = any(j.key == "j_hack" or "hack" in j.label.lower() for j in active_jokers)
-        has_sock = any(j.key == "j_sock_and_buskin" or "sock and buskin" in j.label.lower() for j in active_jokers)
-        has_dusk = any(j.key == "j_dusk" or "dusk" in j.label.lower() for j in active_jokers) and (state and state.hands_left == 1)
-        has_hanging_chad = any(j.key == "j_hanging_chad" or "hanging chad" in j.label.lower() or "chad" in j.label.lower() for j in active_jokers)
+        # Count retrigger Jokers (supports Blueprint / Brainstorm duplicating a retrigger Joker)
+        hack_count = sum(1 for j in active_jokers if (j.key or "").lower() == "j_hack" or "hack" in (j.label or "").lower())
+        sock_count = sum(1 for j in active_jokers if (j.key or "").lower() == "j_sock_and_buskin" or "sock and buskin" in (j.label or "").lower())
+        dusk_count = sum(
+            1 for j in active_jokers
+            if ((j.key or "").lower() == "j_dusk" or "dusk" in (j.label or "").lower()) and (state and state.hands_left == 1)
+        )
+        chad_count = sum(
+            1 for j in active_jokers
+            if (j.key or "").lower() == "j_hanging_chad" or "hanging chad" in (j.label or "").lower() or "chad" in (j.label or "").lower()
+        )
+        seltzer_count = sum(
+            1 for j in active_jokers
+            if (j.key or "").lower() in ("j_selzer", "j_seltzer") or "seltzer" in (j.label or "").lower()
+        )
+        mime_count = sum(
+            1 for j in active_jokers
+            if (j.key or "").lower() == "j_mime" or "mime" in (j.label or "").lower()
+        )
 
-        # 1. Scored Cards Evaluation
+        # 1. Phase 1: Scored Cards Evaluation (Sequential left-to-right, trigger-by-trigger)
         for card_idx, card in enumerate(scoring_cards):
             if is_card_debuffed(card):
                 continue
@@ -267,7 +428,7 @@ class BalatroScoringEngine:
             c_rank = card.effective_rank if hasattr(card, "effective_rank") else card.rank
             c_suit = card.effective_suit if hasattr(card, "effective_suit") else card.suit
             c_nom = card.effective_nominal if hasattr(card, "effective_nominal") else card.nominal
-            is_face = card.is_face_card if hasattr(card, "is_face_card") else c_rank in ("Jack", "Queen", "King")
+            is_face = has_pareidolia or (card.is_face_card if hasattr(card, "is_face_card") else c_rank in ("Jack", "Queen", "King"))
 
             if is_face and first_face_card_id is None:
                 first_face_card_id = card.id or f"face_{card_idx}"
@@ -275,32 +436,39 @@ class BalatroScoringEngine:
             triggers = 1
             if card.seal == "Red":
                 triggers += 1
-            if card_idx == 0 and has_hanging_chad:
-                triggers += 2
-            if has_hack and c_rank in ("2", "3", "4", "5"):
-                triggers += 1
-            if has_sock and is_face:
-                triggers += 1
-            if has_dusk:
-                triggers += 1
+            if card_idx == 0 and chad_count > 0:
+                triggers += 2 * chad_count
+            if hack_count > 0 and c_rank in ("2", "3", "4", "5"):
+                triggers += hack_count
+            if sock_count > 0 and is_face:
+                triggers += sock_count
+            if dusk_count > 0:
+                triggers += dusk_count
+            if seltzer_count > 0:
+                triggers += seltzer_count
 
             for _ in range(triggers):
                 c_chips = c_nom + card.chip_bonus
                 if card.edition and "foil" in card.edition.lower():
                     c_chips += 50
+                total_chips += c_chips
                 card_chips_added += c_chips
 
-                c_mult = card.mult_bonus
-                if card.edition and ("holo" in card.edition.lower() or "holographic" in card.edition.lower()):
-                    c_mult += 10
-                card_mult_added += c_mult
+                if card.mult_bonus:
+                    total_mult += card.mult_bonus
+                    card_mult_added += card.mult_bonus
 
                 if card.x_mult > 1.0:
-                    x_mult_factor *= card.x_mult
-                if card.edition and ("poly" in card.edition.lower() or "polychrome" in card.edition.lower()):
-                    x_mult_factor *= 1.5
+                    total_mult *= card.x_mult
+                    breakdown.append(f"CardX{card.x_mult:g}")
 
-                is_face = card.is_face_card if hasattr(card, "is_face_card") else c_rank in ("Jack", "Queen", "King")
+                if card.edition and ("holo" in card.edition.lower() or "holographic" in card.edition.lower()):
+                    total_mult += 10
+                    card_mult_added += 10
+                if card.edition and ("poly" in card.edition.lower() or "polychrome" in card.edition.lower()):
+                    total_mult *= 1.5
+                    breakdown.append("PolyCard: X1.5")
+
                 is_even = c_rank in ("2", "4", "6", "8", "10")
                 is_odd = c_rank in ("3", "5", "7", "9", "Ace")
                 is_fib = c_rank in ("Ace", "2", "3", "5", "8")
@@ -311,50 +479,67 @@ class BalatroScoringEngine:
 
                     if is_face:
                         if "scary face" in lbl or k == "j_scary_face":
+                            total_chips += 30
                             card_chips_added += 30
                         if "smiley face" in lbl or k == "j_smiley_face":
+                            total_mult += 5
                             card_mult_added += 5
                         if ("photograph" in lbl or k == "j_photograph") and ((card.id or f"face_{card_idx}") == first_face_card_id):
-                            x_mult_factor *= 2.0
+                            total_mult *= 2.0
                             breakdown.append("Photograph: X2")
                         if ("triboulet" in lbl or k == "j_triboulet") and c_rank in ("King", "Queen"):
-                            x_mult_factor *= 2.0
+                            total_mult *= 2.0
                             breakdown.append("Triboulet: X2")
 
                     if is_even and ("even steven" in lbl or k == "j_even_steven"):
+                        total_mult += 4
                         card_mult_added += 4
                     if is_odd and ("odd todd" in lbl or k == "j_odd_todd"):
-                        card_chips_added += 30
+                        total_chips += 31
+                        card_chips_added += 31
                     if is_fib and ("fibonacci" in lbl or k == "j_fibonacci"):
+                        total_mult += 8
                         card_mult_added += 8
                     if c_rank == "Ace" and ("scholar" in lbl or k == "j_scholar"):
+                        total_chips += 20
+                        total_mult += 4
                         card_chips_added += 20
                         card_mult_added += 4
                     if c_rank in ("10", "4") and ("walkie talkie" in lbl or k == "j_walkie_talkie"):
+                        total_chips += 10
+                        total_mult += 4
                         card_chips_added += 10
                         card_mult_added += 4
                     if "hiker" in lbl or k == "j_hiker":
+                        total_chips += 5
                         card_chips_added += 5
 
                     is_wild = c_suit == "Wild" or card.enhancement == "Wild"
                     if c_suit == "Diamonds" or is_wild:
                         if "greedy" in lbl or k == "j_greedy_joker":
+                            total_mult += 3
                             card_mult_added += 3
                     if c_suit == "Hearts" or is_wild:
                         if "lusty" in lbl or k == "j_lusty_joker":
+                            total_mult += 3
                             card_mult_added += 3
                         if "bloodstone" in lbl or k == "j_bloodstone":
-                            x_mult_factor *= 1.5
+                            total_mult *= 1.5
+                            breakdown.append("Bloodstone: X1.5")
                     if c_suit == "Spades" or is_wild:
                         if "wrathful" in lbl or k == "j_wrathful_joker":
+                            total_mult += 3
                             card_mult_added += 3
                         if "arrowhead" in lbl or k == "j_arrowhead":
+                            total_chips += 50
                             card_chips_added += 50
-                        if "onyx agate" in lbl or k == "j_onyx_agate":
-                            card_mult_added += 7
                     if c_suit == "Clubs" or is_wild:
                         if "gluttonous" in lbl or k == "j_gluttonous_joker":
+                            total_mult += 3
                             card_mult_added += 3
+                        if "onyx agate" in lbl or k == "j_onyx_agate":
+                            total_mult += 7
+                            card_mult_added += 7
 
                     if "ancient" in lbl or k == "j_ancient":
                         ancient_suit = getattr(j, "target_suit", None)
@@ -371,44 +556,111 @@ class BalatroScoringEngine:
                                 elif "пик" in raw_s or "spade" in raw_s:
                                     ancient_suit = "Spades"
                         if ancient_suit and (c_suit == ancient_suit or is_wild):
-                            x_mult_factor *= 1.5
+                            total_mult *= 1.5
                             breakdown.append(f"Ancient({ancient_suit}): X1.5")
 
-        total_chips += card_chips_added
-        total_mult += card_mult_added
+                    if "idol" in lbl or k == "j_idol":
+                        idol_suit = getattr(j, "target_suit", None)
+                        idol_rank = getattr(j, "target_rank", None)
+                        if idol_suit and idol_rank and (c_suit == idol_suit or is_wild) and c_rank == idol_rank:
+                            total_mult *= 2.0
+                            breakdown.append(f"Idol({idol_rank} {idol_suit}): X2")
+
         if card_chips_added > 0:
             breakdown.append(f"Cards: +{card_chips_added}c")
         if card_mult_added > 0:
             breakdown.append(f"Triggers: +{card_mult_added}m")
 
-        # 2. Hand-Type Specific Jokers
+        # 2. Phase 2: Held-in-Hand Card Effects (Raised Fist, Shoot the Moon, Baron, Steel, with Red Seal & Mime)
+        if state and state.hand:
+            played_ids = {c.id for c in cards}
+            held = [c for c in state.hand if c.id not in played_ids]
+            valid_held = [hc for hc in held if not is_card_debuffed(hc) and hc.enhancement != "Stone"]
+
+            # Raised Fist: double the rank of the lowest-ranked card held in hand
+            raised_fist_count = sum(
+                1 for j in active_jokers if (j.key or "").lower() == "j_raised_fist" or "raised fist" in (j.label or "").lower()
+            )
+            if raised_fist_count > 0 and valid_held:
+                lowest_hc = min(
+                    valid_held,
+                    key=lambda hc: RANK_ORDER.get(hc.effective_rank if hasattr(hc, "effective_rank") else hc.rank, 99),
+                )
+                rf_triggers = 1 + (1 if lowest_hc.seal == "Red" else 0) + mime_count
+                rf_nom = lowest_hc.effective_nominal if hasattr(lowest_hc, "effective_nominal") else lowest_hc.nominal
+                rf_bonus = 2 * rf_nom * raised_fist_count * rf_triggers
+                if rf_bonus > 0:
+                    total_mult += rf_bonus
+                    breakdown.append(f"RaisedFist: +{rf_bonus}m")
+
+            for hc in held:
+                if not is_card_debuffed(hc):
+                    hc_triggers = 1 + (1 if hc.seal == "Red" else 0) + mime_count
+                    hc_rank = hc.effective_rank if hasattr(hc, "effective_rank") else hc.rank
+                    for _ in range(hc_triggers):
+                        if hc.enhancement == "Steel":
+                            total_mult *= 1.5
+                            breakdown.append("HeldSteel: X1.5")
+                        for j in active_jokers:
+                            jk = (j.key or "").lower()
+                            jlbl = (j.label or "").lower()
+                            if (jk == "j_shoot_the_moon" or "shoot the moon" in jlbl) and hc_rank == "Queen":
+                                total_mult += 13
+                                breakdown.append("ShootMoonQueen: +13m")
+                            elif (jk == "j_baron" or "baron" in jlbl) and hc_rank == "King":
+                                total_mult *= 1.5
+                                breakdown.append("BaronKing: X1.5")
+
+        # 3. Phase 3: Joker Bar Evaluation (Strictly left-to-right!)
         contains_pair = hand_type in ("Pair", "Two Pair", "Three of a Kind", "Full House", "Four of a Kind", "Five of a Kind", "Flush House", "Flush Five")
         contains_two_pair = hand_type in ("Two Pair", "Full House", "Flush House")
         contains_three = hand_type in ("Three of a Kind", "Full House", "Flush House", "Four of a Kind", "Five of a Kind", "Flush Five")
         contains_straight = hand_type in ("Straight", "Straight Flush")
         contains_flush = hand_type in ("Flush", "Straight Flush", "Flush House", "Flush Five")
         contains_four = hand_type in ("Four of a Kind", "Five of a Kind", "Flush Five")
+        has_scored_face = any(
+            (has_pareidolia or (sc.is_face_card if hasattr(sc, "is_face_card") else sc.rank in ("Jack", "Queen", "King")))
+            for sc in scoring_cards
+            if not is_card_debuffed(sc)
+        )
+        phase12_xmult_keys = {
+            "j_photograph", "j_ancient", "j_triboulet", "j_bloodstone", "j_idol", "j_baron"
+        }
+        baseball_count = sum(
+            1 for j in active_jokers if (j.key or "").lower() == "j_baseball" or "baseball" in (j.label or "").lower()
+        )
 
         for j in active_jokers:
             k = (j.key or "").lower()
             lbl = (j.label or "").lower()
+            desc = (j.effect_desc or "")
+            ed = (getattr(j, "edition", None) or "").lower()
 
+            # Pre-ability edition bonuses (Foil +50c, Holographic +10m)
+            if "foil" in ed:
+                total_chips += 50
+                breakdown.append(f"{j.label}(Foil): +50c")
+            elif "holo" in ed:
+                total_mult += 10
+                breakdown.append(f"{j.label}(Holo): +10m")
+
+            # Hand-Type Specific Jokers
             if contains_pair:
                 if "jolly" in lbl or k == "j_jolly":
                     total_mult += 8
                     breakdown.append("Jolly: +8m")
-                if "sly" in lbl or k == "j_sly":
+                elif "sly" in lbl or k == "j_sly":
                     total_chips += 50
                     breakdown.append("Sly: +50c")
-                if "the duo" in lbl or k in ("j_duo", "j_the_duo"):
-                    x_mult_factor *= 2.0
+                elif "the duo" in lbl or k in ("j_duo", "j_the_duo"):
+                    total_mult *= 2.0
                     breakdown.append("The Duo: X2")
 
             if contains_two_pair:
                 if "mad" in lbl or k == "j_mad":
                     total_mult += 10
                     breakdown.append("Mad: +10m")
-                if "clever" in lbl or k == "j_clever":
+                elif "clever" in lbl or k == "j_clever":
                     total_chips += 80
                     breakdown.append("Clever: +80c")
 
@@ -416,50 +668,44 @@ class BalatroScoringEngine:
                 if "zany" in lbl or k == "j_zany":
                     total_mult += 12
                     breakdown.append("Zany: +12m")
-                if "wily" in lbl or k == "j_wily":
+                elif "wily" in lbl or k == "j_wily":
                     total_chips += 100
                     breakdown.append("Wily: +100c")
-                if "the trio" in lbl or k in ("j_trio", "j_the_trio"):
-                    x_mult_factor *= 3.0
+                elif "the trio" in lbl or k in ("j_trio", "j_the_trio"):
+                    total_mult *= 3.0
                     breakdown.append("The Trio: X3")
 
             if contains_straight:
                 if "crazy" in lbl or k == "j_crazy":
                     total_mult += 12
                     breakdown.append("Crazy: +12m")
-                if "devious" in lbl or k == "j_devious":
+                elif "devious" in lbl or k == "j_devious":
                     total_chips += 100
                     breakdown.append("Devious: +100c")
-                if "the order" in lbl or k in ("j_order", "j_the_order"):
-                    x_mult_factor *= 3.0
+                elif "the order" in lbl or k in ("j_order", "j_the_order"):
+                    total_mult *= 3.0
                     breakdown.append("The Order: X3")
 
             if contains_flush:
                 if "droll" in lbl or k == "j_droll":
                     total_mult += 10
                     breakdown.append("Droll: +10m")
-                if "crafty" in lbl or k == "j_crafty":
+                elif "crafty" in lbl or k == "j_crafty":
                     total_chips += 80
                     breakdown.append("Crafty: +80c")
-                if "the tribe" in lbl or k in ("j_tribe", "j_the_tribe"):
-                    x_mult_factor *= 2.0
+                elif "the tribe" in lbl or k in ("j_tribe", "j_the_tribe"):
+                    total_mult *= 2.0
                     breakdown.append("The Tribe: X2")
 
-            if contains_four:
-                if "the family" in lbl or k in ("j_family", "j_the_family"):
-                    x_mult_factor *= 4.0
-                    breakdown.append("The Family: X4")
+            if contains_four and ("the family" in lbl or k in ("j_family", "j_the_family")):
+                total_mult *= 4.0
+                breakdown.append("The Family: X4")
 
             if len(cards) <= 3 and ("half" in lbl or k == "j_half"):
                 total_mult += 20
                 breakdown.append("Half: +20m")
 
-        # 3. Flat Chips and Flat Mult Jokers
-        for j in active_jokers:
-            k = (j.key or "").lower()
-            lbl = (j.label or "").lower()
-            desc = (j.effect_desc or "")
-
+            # Flat & Scaling Chips / Mult Jokers
             if k == "j_joker" or lbl == "joker":
                 total_mult += 4
                 breakdown.append("Joker: +4m")
@@ -469,9 +715,9 @@ class BalatroScoringEngine:
                 total_mult += bonus
                 breakdown.append(f"Abstract: +{bonus}m")
             elif "supernova" in lbl or k == "j_supernova":
-                if hand_played > 0:
-                    total_mult += hand_played
-                    breakdown.append(f"Supernova: +{hand_played}m")
+                sn_mult = hand_played + 1
+                total_mult += sn_mult
+                breakdown.append(f"Supernova: +{sn_mult}m")
             elif "bull" in lbl or k == "j_bull":
                 dollars = max(0, state.dollars) if state else 0
                 bonus = 2 * dollars
@@ -489,16 +735,59 @@ class BalatroScoringEngine:
                 bonus = 2 * deck_rem
                 total_chips += bonus
                 breakdown.append(f"BlueJoker: +{bonus}c")
+            elif "stuntman" in lbl or k == "j_stuntman":
+                total_chips += 250
+                breakdown.append("Stuntman: +250c")
             elif "ice cream" in lbl or k == "j_ice_cream":
                 m = re.search(r'\+?(\d+)\s*[Cc]hips', desc)
-                bonus = int(m.group(1)) if m else 80
+                bonus = j.chips if j.chips > 0 else (int(m.group(1)) if m else 100)
                 total_chips += bonus
                 breakdown.append(f"IceCream: +{bonus}c")
+            elif k in ("j_runner", "j_castle", "j_square", "j_wee", "j_stone") or any(
+                w in lbl for w in ("runner", "castle", "square joker", "wee joker", "stone joker")
+            ):
+                bonus = j.chips
+                if bonus <= 0:
+                    m = re.search(r'\+(\d+)\s*[Cc]hips', desc)
+                    bonus = int(m.group(1)) if m else 0
+                if (k == "j_square" or "square joker" in lbl) and len(cards) == 4:
+                    bonus += 4
+                elif (k == "j_runner" or "runner" in lbl) and contains_straight:
+                    bonus += 15
+                if bonus > 0:
+                    total_chips += bonus
+                    breakdown.append(f"{j.label}: +{bonus}c")
             elif "popcorn" in lbl or k == "j_popcorn":
                 m = re.search(r'\+?(\d+)\s*[Mm]ult', desc)
-                bonus = int(m.group(1)) if m else 20
+                bonus = j.mult if j.mult > 0 else (int(m.group(1)) if m else 20)
                 total_mult += bonus
                 breakdown.append(f"Popcorn: +{bonus}m")
+            elif "green joker" in lbl or k == "j_green_joker":
+                bonus = max(0, j.mult) + 1
+                total_mult += bonus
+                breakdown.append(f"GreenJoker: +{bonus}m")
+            elif "ride the bus" in lbl or k == "j_ride_the_bus":
+                if has_scored_face:
+                    breakdown.append("RideTheBus: RESET(0m)")
+                else:
+                    bonus = max(0, j.mult) + 1
+                    total_mult += bonus
+                    breakdown.append(f"RideTheBus: +{bonus}m")
+            elif "spare trousers" in lbl or k == "j_trousers":
+                bonus = max(0, j.mult) + (2 if contains_two_pair else 0)
+                if bonus > 0:
+                    total_mult += bonus
+                    breakdown.append(f"SpareTrousers: +{bonus}m")
+            elif k in ("j_red_card", "j_fortune_teller", "j_flash", "j_erosion") or any(
+                w in lbl for w in ("red card", "fortune teller", "flash card", "erosion")
+            ):
+                bonus = j.mult
+                if bonus <= 0:
+                    m = re.search(r'\+(\d+)\s*[Mm]ult', desc)
+                    bonus = int(m.group(1)) if m else 0
+                if bonus > 0:
+                    total_mult += bonus
+                    breakdown.append(f"{j.label}: +{bonus}m")
             elif "gros michel" in lbl or k == "j_gros_michel":
                 total_mult += 15
                 breakdown.append("GrosMichel: +15m")
@@ -522,19 +811,14 @@ class BalatroScoringEngine:
                     total_mult += bonus
                     breakdown.append(f"Bootstraps: +{bonus}m")
 
-        # 4. Independent / Post-trigger xMult Jokers
-        for j in active_jokers:
-            k = (j.key or "").lower()
-            lbl = (j.label or "").lower()
-            desc = (j.effect_desc or "")
-
+            # Independent Phase-3 XMult Jokers
             if "stencil" in lbl or k == "j_stencil":
                 max_slots = state.max_jokers if state else 5
                 cur_count = len(state.jokers) if state else 1
                 empty_slots = max(0, max_slots - cur_count)
                 stencil_mult = 1.0 + empty_slots
                 if stencil_mult > 1.0:
-                    x_mult_factor *= stencil_mult
+                    total_mult *= stencil_mult
                     breakdown.append(f"Stencil: X{stencil_mult:g}")
             elif "blackboard" in lbl or k == "j_blackboard":
                 if state and state.hand:
@@ -542,66 +826,60 @@ class BalatroScoringEngine:
                     held = [c for c in state.hand if c.id not in played_ids]
                     is_bb_active = all(c.suit in ("Spades", "Clubs", "Wild") or c.enhancement == "Wild" for c in held)
                     if is_bb_active:
-                        x_mult_factor *= 3.0
+                        total_mult *= 3.0
                         breakdown.append("Blackboard: X3")
             elif "cavendish" in lbl or k == "j_cavendish":
-                x_mult_factor *= 3.0
+                total_mult *= 3.0
                 breakdown.append("Cavendish: X3")
             elif "acrobat" in lbl or k == "j_acrobat":
                 if state and state.hands_left == 1:
-                    x_mult_factor *= 3.0
+                    total_mult *= 3.0
                     breakdown.append("Acrobat: X3")
             elif "card sharp" in lbl or k == "j_card_sharp":
-                if hand_played > 0:
-                    x_mult_factor *= 3.0
+                played_this_round = [t.lower() for t in getattr(state, "played_hand_types_this_round", []) if t] if state else []
+                if hand_type.lower() in played_this_round:
+                    total_mult *= 3.0
                     breakdown.append("CardSharp: X3")
-            elif j.effect_type == "x_mult":
+            elif "seeing double" in lbl or k == "j_seeing_double":
+                suits_scored = [sc.effective_suit for sc in scoring_cards if not is_card_debuffed(sc)]
+                has_club = any(s in ("Clubs", "Wild") for s in suits_scored)
+                has_other = any(s in ("Hearts", "Diamonds", "Spades", "Wild") for s in suits_scored)
+                if has_club and has_other and len(scoring_cards) >= 2:
+                    total_mult *= 2.0
+                    breakdown.append("SeeingDouble: X2")
+            elif "flower pot" in lbl or k == "j_flower_pot":
+                suits_scored = {sc.effective_suit for sc in scoring_cards if not is_card_debuffed(sc)}
+                if len(suits_scored.intersection({"Spades", "Hearts", "Clubs", "Diamonds"})) == 4:
+                    total_mult *= 3.0
+                    breakdown.append("FlowerPot: X3")
+            elif j.effect_type == "x_mult" and k not in phase12_xmult_keys and not any(
+                w in lbl for w in ("photograph", "ancient", "triboulet", "bloodstone", "idol", "baron", "the duo", "the trio", "the family", "the order", "the tribe")
+            ):
                 val = getattr(j, "x_mult", 1.0)
                 if val > 1.0:
-                    x_mult_factor *= val
+                    total_mult *= val
                     breakdown.append(f"{j.label}: X{val:g}")
                 else:
                     m = re.search(r'[Xx]([\d\.]+)\s*[Mm]ult', desc)
                     if m:
                         val_m = float(m.group(1))
                         if val_m > 1.0:
-                            x_mult_factor *= val_m
+                            total_mult *= val_m
                             breakdown.append(f"{j.label}: X{val_m:g}")
 
-        # 4b. Joker Editions (Foil: +50c, Holographic: +10m, Polychrome: X1.5)
-        for j in active_jokers:
-            ed = (getattr(j, "edition", None) or "").lower()
-            if "foil" in ed:
-                total_chips += 50
-                breakdown.append(f"{j.label}(Foil): +50c")
-            elif "holo" in ed:
-                total_mult += 10
-                breakdown.append(f"{j.label}(Holo): +10m")
-            elif "poly" in ed:
-                x_mult_factor *= 1.5
+            # Baseball Card trigger on Uncommon Jokers
+            if baseball_count > 0 and getattr(j, "rarity", "") == "Uncommon":
+                for _ in range(baseball_count):
+                    total_mult *= 1.5
+                    breakdown.append(f"Baseball({j.label}): X1.5")
+
+            # Post-ability Polychrome edition (X1.5)
+            if "poly" in ed:
+                total_mult *= 1.5
                 breakdown.append(f"{j.label}(Poly): X1.5")
 
-        # 5. Held-in-Hand Card Effects
-        if state and state.hand:
-            played_ids = {c.id for c in cards}
-            held = [c for c in state.hand if c.id not in played_ids]
-            has_baron = any("baron" in (j.label or "").lower() or j.key == "j_baron" for j in active_jokers)
-            has_shoot = any("shoot the moon" in (j.label or "").lower() or j.key == "j_shoot_the_moon" for j in active_jokers)
-
-            for hc in held:
-                if not is_card_debuffed(hc):
-                    if hc.enhancement == "Steel":
-                        x_mult_factor *= 1.5
-                        breakdown.append("HeldSteel: X1.5")
-                    if has_baron and hc.rank == "King":
-                        x_mult_factor *= 1.5
-                        breakdown.append("BaronKing: X1.5")
-                    if has_shoot and hc.rank == "Queen":
-                        total_mult += 13
-                        breakdown.append("ShootMoonQueen: +13m")
-
-        final_chips = int(total_chips)
-        final_mult = int(round(total_mult * x_mult_factor))
+        final_chips = int(round(total_chips))
+        final_mult = int(round(total_mult))
         if final_mult < 1:
             final_mult = 1
 
@@ -659,7 +937,8 @@ class BalatroScoringEngine:
                     continue
                 seen_signatures.add(combo_signature)
 
-                res = self.calculate_expected_hand_score(combo, hand_type=hand_type, state=state)
+                ordered_combo = self.optimize_card_order_for_scoring(combo, hand_type=hand_type, state=state)
+                res = self.calculate_expected_hand_score(ordered_combo, hand_type=hand_type, state=state)
                 candidates.append(res)
 
         # Sort descending by projected final score, preferring 5-card plays
@@ -697,11 +976,11 @@ class BalatroScoringEngine:
                 ]
             elif hand_type == "Straight Flush":
                 return [
-                    CardModel(id="sim_c1", rank="10", suit=dominant_suit, nominal=10),
-                    CardModel(id="sim_c2", rank="9", suit=dominant_suit, nominal=9),
-                    CardModel(id="sim_c3", rank="8", suit=dominant_suit, nominal=8),
-                    CardModel(id="sim_c4", rank="7", suit=dominant_suit, nominal=7),
-                    CardModel(id="sim_c5", rank="6", suit=dominant_suit, nominal=6),
+                    CardModel(id="sim_c1", rank="King", suit=dominant_suit, nominal=10),
+                    CardModel(id="sim_c2", rank="Queen", suit=dominant_suit, nominal=10),
+                    CardModel(id="sim_c3", rank="Jack", suit=dominant_suit, nominal=10),
+                    CardModel(id="sim_c4", rank="10", suit=dominant_suit, nominal=10),
+                    CardModel(id="sim_c5", rank="9", suit=dominant_suit, nominal=9),
                 ]
             elif hand_type == "Flush House":
                 return [
@@ -745,11 +1024,11 @@ class BalatroScoringEngine:
             ]
         elif hand_type == "Straight":
             return [
-                CardModel(id="sim_c1", rank="10", suit=dominant_suit, nominal=10),
-                CardModel(id="sim_c2", rank="9", suit=s1, nominal=9),
-                CardModel(id="sim_c3", rank="8", suit=s2, nominal=8),
-                CardModel(id="sim_c4", rank="7", suit=s3, nominal=7),
-                CardModel(id="sim_c5", rank="6", suit=dominant_suit, nominal=6),
+                CardModel(id="sim_c1", rank="King", suit=dominant_suit, nominal=10),
+                CardModel(id="sim_c2", rank="Queen", suit=s1, nominal=10),
+                CardModel(id="sim_c3", rank="Jack", suit=s2, nominal=10),
+                CardModel(id="sim_c4", rank="10", suit=s3, nominal=10),
+                CardModel(id="sim_c5", rank="9", suit=dominant_suit, nominal=9),
             ]
         elif hand_type == "Three of a Kind":
             return [
@@ -776,6 +1055,28 @@ class BalatroScoringEngine:
                 CardModel(id="sim_c5", rank="5", suit=s3, nominal=5),
             ]
         else:  # High Card
+            has_face_synergy = False
+            has_scholar = False
+            if state and state.jokers:
+                for j in state.jokers:
+                    if j.debuffed:
+                        continue
+                    jk = (j.key or "").lower()
+                    jl = (j.label or "").lower()
+                    if jk in ("j_photograph", "j_sock_and_buskin", "j_scary_face", "j_smiley_face", "j_triboulet") or any(
+                        w in jl for w in ("photograph", "sock and buskin", "scary face", "smiley face", "triboulet")
+                    ):
+                        has_face_synergy = True
+                    if jk == "j_scholar" or "scholar" in jl:
+                        has_scholar = True
+            if has_face_synergy and not has_scholar:
+                return [
+                    CardModel(id="sim_c1", rank="King", suit=dominant_suit, nominal=10),
+                    CardModel(id="sim_c2", rank="Queen", suit=s1, nominal=10),
+                    CardModel(id="sim_c3", rank="8", suit=s2, nominal=8),
+                    CardModel(id="sim_c4", rank="5", suit=s3, nominal=5),
+                    CardModel(id="sim_c5", rank="2", suit=dominant_suit, nominal=2),
+                ]
             return [
                 CardModel(id="sim_c1", rank="Ace", suit=dominant_suit, nominal=11),
                 CardModel(id="sim_c2", rank="King", suit=s1, nominal=10),

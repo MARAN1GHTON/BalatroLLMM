@@ -54,6 +54,96 @@ PLANET_HAND_UPGRADES = {
 }
 
 
+def resolve_card_ids(raw_ids: Any, hand: Sequence[CardModel] | None) -> list[str]:
+    """Resolves a list of card identifiers, automatically mapping human-readable rank/suit
+    strings (e.g. 'K♠', '10♥', 'King of Spades', 'A♦') to actual `c_...` IDs in `hand`."""
+    clean_ids = normalize_id_list(raw_ids)
+    if not clean_ids or not hand:
+        return clean_ids
+
+    hand_map = {c.id: c for c in hand}
+    if all(cid in hand_map for cid in clean_ids):
+        return clean_ids
+
+    rank_aliases = {
+        "a": "Ace", "ace": "Ace", "туз": "Ace",
+        "k": "King", "king": "King", "король": "King",
+        "q": "Queen", "queen": "Queen", "дама": "Queen",
+        "j": "Jack", "jack": "Jack", "валет": "Jack",
+        "t": "10", "10": "10",
+        "9": "9", "8": "8", "7": "7", "6": "6", "5": "5", "4": "4", "3": "3", "2": "2",
+    }
+    suit_aliases = {
+        "♠": "Spades", "s": "Spades", "spade": "Spades", "spades": "Spades", "пик": "Spades",
+        "♥": "Hearts", "h": "Hearts", "heart": "Hearts", "hearts": "Hearts", "черв": "Hearts",
+        "♦": "Diamonds", "d": "Diamonds", "diamond": "Diamonds", "diamonds": "Diamonds", "буб": "Diamonds",
+        "♣": "Clubs", "c": "Clubs", "club": "Clubs", "clubs": "Clubs", "треф": "Clubs",
+    }
+
+    used_ids: set[str] = {cid for cid in clean_ids if cid in hand_map}
+    resolved: list[str] = []
+
+    for token in clean_ids:
+        if token in hand_map:
+            resolved.append(token)
+            continue
+
+        t_str = str(token).strip()
+        # Try extracting c_digits if embedded like "[c_123: K♠]"
+        m_cid = re.search(r"\bc_\w+\b", t_str)
+        if m_cid and m_cid.group(0) in hand_map:
+            cid_match = m_cid.group(0)
+            resolved.append(cid_match)
+            used_ids.add(cid_match)
+            continue
+
+        # Parse rank and optional suit from human-readable token (e.g. "K♠", "10H", "King of Spades")
+        target_rank: str | None = None
+        target_suit: str | None = None
+        t_low = t_str.lower()
+
+        for sym, s_name in [("♠", "Spades"), ("♥", "Hearts"), ("♦", "Diamonds"), ("♣", "Clubs")]:
+            if sym in t_str:
+                target_suit = s_name
+                t_low = t_low.replace(sym, " ").strip()
+                break
+
+        if not target_suit:
+            for s_key, s_name in suit_aliases.items():
+                if len(s_key) > 1 and s_key in t_low:
+                    target_suit = s_name
+                    t_low = re.sub(r"\b(of\s+)?" + re.escape(s_key) + r"\w*\b", " ", t_low).strip()
+                    break
+
+        # Compact 2-3 char format like "ks", "10h", "ad"
+        m_compact = re.match(r"^(10|[2-9akqjt])([shdc])$", t_low)
+        if m_compact:
+            target_rank = rank_aliases.get(m_compact.group(1))
+            target_suit = suit_aliases.get(m_compact.group(2))
+        else:
+            for r_key, r_name in sorted(rank_aliases.items(), key=lambda x: len(x[0]), reverse=True):
+                if re.search(r"(?:^|\b)" + re.escape(r_key) + r"(?:\b|$)", t_low):
+                    target_rank = r_name
+                    break
+
+        matched_card = None
+        if target_rank:
+            for c in hand:
+                if c.id in used_ids or c.face_down:
+                    continue
+                if c.rank == target_rank and (target_suit is None or c.suit == target_suit):
+                    matched_card = c
+                    break
+
+        if matched_card is not None:
+            resolved.append(matched_card.id)
+            used_ids.add(matched_card.id)
+        else:
+            resolved.append(token)
+
+    return resolved
+
+
 def execute_python_eval(code: str, state: GameState | None = None) -> str:
     """Executes Python code in a sandboxed namespace pre-populated with math, combinatorics,
 
@@ -92,6 +182,15 @@ def execute_python_eval(code: str, state: GameState | None = None) -> str:
         "hands_to_beat": hands_to_beat,
     }
 
+    class _AttrDict(dict):
+        """Dictionary that supports both key indexing d['k'] and attribute access d.k."""
+
+        def __getattr__(self, name: str):
+            try:
+                return self[name]
+            except KeyError:
+                raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+
     if state:
         ns["dollars"] = state.dollars
         ns["ante"] = state.ante
@@ -107,61 +206,74 @@ def execute_python_eval(code: str, state: GameState | None = None) -> str:
         ns["is_boss"] = bool(state.blind and state.blind.is_boss)
         ns["boss_name"] = state.blind.name if state.blind else ""
 
-        # Represent hand cards as readable dicts
+        # Represent hand cards as readable dicts supporting both d['rank'] and d.rank
         ns["hand"] = [
-            {
-                "id": c.id,
-                "rank": c.rank,
-                "suit": c.suit,
-                "nominal": c.nominal,
-                "enhancement": c.enhancement,
-                "edition": c.edition,
-                "seal": c.seal,
-                "debuffed": c.debuffed,
-            }
+            _AttrDict(
+                {
+                    "id": c.id,
+                    "rank": c.rank,
+                    "suit": c.suit,
+                    "nominal": c.nominal,
+                    "enhancement": c.enhancement,
+                    "edition": c.edition,
+                    "seal": c.seal,
+                    "debuffed": c.debuffed,
+                    "played_this_ante": getattr(c, "played_this_ante", False),
+                }
+            )
             for c in (state.hand or [])
         ]
 
-        # Represent jokers as readable dicts
+        # Represent jokers as readable dicts supporting both j['label'] and j.label
         ns["jokers"] = [
-            {
-                "id": j.id,
-                "key": j.key,
-                "label": j.label,
-                "effect_type": j.effect_type,
-                "x_mult": j.x_mult,
-                "mult": j.mult,
-                "chips": j.chips,
-                "sell_cost": j.sell_cost,
-                "debuffed": j.debuffed,
-            }
+            _AttrDict(
+                {
+                    "id": j.id,
+                    "key": j.key,
+                    "label": j.label,
+                    "effect_type": j.effect_type,
+                    "x_mult": j.x_mult,
+                    "mult": j.mult,
+                    "chips": j.chips,
+                    "sell_cost": j.sell_cost,
+                    "debuffed": j.debuffed,
+                    "target_suit": getattr(j, "target_suit", None),
+                    "target_rank": getattr(j, "target_rank", None),
+                    "target_hand": getattr(j, "target_hand", None),
+                }
+            )
             for j in (state.jokers or [])
         ]
 
         # Represent deck suit breakdown and granular cards
         if state.deck_summary:
-            ns["deck_suits"] = dict(state.deck_summary.suits)
-            ns["deck_ranks"] = dict(state.deck_summary.ranks)
-            ns["deck_specials"] = [sc.model_dump() for sc in state.deck_summary.special_cards]
-            ns["deck_cards"] = [c.model_dump() for c in state.deck_summary.cards]
+            ns["deck_suits"] = _AttrDict(state.deck_summary.suits)
+            ns["deck_ranks"] = _AttrDict(state.deck_summary.ranks)
+            ns["deck_specials"] = [_AttrDict(sc.model_dump()) for sc in state.deck_summary.special_cards]
+            ns["deck_cards"] = [_AttrDict(c.model_dump()) for c in state.deck_summary.cards]
             ns["deck_remaining"] = state.deck_summary.total_remaining or state.deck_remaining
         else:
-            ns["deck_suits"] = {}
-            ns["deck_ranks"] = {}
+            ns["deck_suits"] = _AttrDict()
+            ns["deck_ranks"] = _AttrDict()
             ns["deck_specials"] = []
             ns["deck_cards"] = []
             ns["deck_remaining"] = state.deck_remaining
 
         # Represent poker hand levels
-        ns["poker_hands"] = {
-            ph.name: {
-                "level": ph.level,
-                "chips": ph.chips,
-                "mult": ph.mult,
-                "played": ph.played,
+        ns["poker_hands"] = _AttrDict(
+            {
+                ph.name: _AttrDict(
+                    {
+                        "level": ph.level,
+                        "chips": ph.chips,
+                        "mult": ph.mult,
+                        "played": ph.played,
+                    }
+                )
+                for ph in (state.poker_hands or [])
             }
-            for ph in (state.poker_hands or [])
-        }
+        )
+        ns["played_hands"] = list(getattr(state, "played_hand_types_this_round", []) or [])
     else:
         ns["dollars"] = 0
         ns["hands_left"] = 4
@@ -177,6 +289,16 @@ def execute_python_eval(code: str, state: GameState | None = None) -> str:
         ns["deck_cards"] = []
         ns["deck_remaining"] = 52
         ns["poker_hands"] = {}
+        ns["played_hands"] = []
+
+    # Convenient aliases so models don't hit NameError on common variable names
+    ns["cards"] = ns["hand"]
+    ns["bank"] = ns["dollars"]
+    ns["cash"] = ns["dollars"]
+    ns["hands"] = ns["hands_left"]
+    ns["discards"] = ns["discards_left"]
+    ns["score_left"] = ns["score_needed"]
+    ns["remaining_score"] = ns["score_needed"]
 
     initial_keys = set(ns.keys())
     stdout_capture = io.StringIO()
@@ -191,15 +313,15 @@ def execute_python_eval(code: str, state: GameState | None = None) -> str:
                 # Interactive REPL / Jupyter mode: execute leading statements, eval and print final expression
                 *leading, last_expr = parsed.body
                 if leading:
-                    exec(compile(ast.Module(body=leading, type_ignores=[]), "<exec>", "exec"), ns)
-                res = eval(compile(ast.Expression(body=last_expr.value), "<eval>", "eval"), ns)
+                    exec(compile(ast.Module(body=leading, type_ignores=[]), "<exec>", "exec"), ns, ns)
+                res = eval(compile(ast.Expression(body=last_expr.value), "<eval>", "eval"), ns, ns)
                 if res is not None:
                     print(repr(res))
             else:
-                exec(compile(parsed, "<exec>", "exec"), ns)
+                exec(compile(parsed, "<exec>", "exec"), ns, ns)
         except SyntaxError:
             # Fallback to standard exec if AST parsing of snippet fails
-            exec(compile(clean_code, "<exec>", "exec"), ns)
+            exec(compile(clean_code, "<exec>", "exec"), ns, ns)
 
         output = stdout_capture.getvalue().strip()
         if not output:
@@ -226,7 +348,7 @@ def execute_simulate_hand(card_ids: Any, state: GameState | None = None) -> str:
     if not state or not state.hand:
         return "Error: No active hand cards available to simulate."
 
-    clean_ids = normalize_id_list(card_ids)
+    clean_ids = resolve_card_ids(card_ids, state.hand)
     if not clean_ids:
         return "Error: `card_ids` must be a non-empty list of 1 to 5 card IDs."
 
@@ -418,7 +540,8 @@ def execute_simulate_shop_buy(
     if item.item_type == "Joker":
         cur_cnt = len(state.jokers)
         max_cnt = state.max_jokers
-        will_fit = (cur_cnt - (1 if sell_joker else 0)) < max_cnt
+        is_neg = (getattr(item, "edition", None) or "").lower() == "negative"
+        will_fit = is_neg or (cur_cnt - (1 if sell_joker else 0)) < max_cnt
 
         if not will_fit:
             lines.append(
@@ -431,9 +554,10 @@ def execute_simulate_shop_buy(
         sim_jokers = [j for j in state.jokers if j.id != sell_joker_id]
         new_joker_model = JokerModel(
             id="sim_new_joker",
-            key=item.id,
+            key=getattr(item, "key", None) or item.id,
             label=item.label,
             effect_desc=item.desc,
+            edition=getattr(item, "edition", None),
             sell_cost=max(1, item_cost // 2),
         )
         sim_jokers.append(new_joker_model)
@@ -441,8 +565,8 @@ def execute_simulate_shop_buy(
         # Find player's most played hand for benchmark testing
         tested_hand_name = "Flush"
         if state.poker_hands:
-            most_played = max(state.poker_hands, key=lambda ph: ph.played, default=None)
-            if most_played and most_played.played > 0:
+            most_played = max(state.poker_hands, key=lambda ph: (ph.played, ph.level), default=None)
+            if most_played and (most_played.played > 0 or most_played.level > 1):
                 tested_hand_name = most_played.name
 
         sample_cards = engine.get_representative_hand(tested_hand_name, state=state)
@@ -464,6 +588,25 @@ def execute_simulate_shop_buy(
             f"- Net Score Impact: **{delta_score:+,} pts ({pct_change:+.1f}%)**",
             f"- New Joker Roster ({len(sim_jokers)}/{max_cnt}): {', '.join(j.label for j in sim_jokers)}",
         ])
+
+        # Also check if upcoming Boss is The Flint or has a score-altering debuff
+        boss_name = state.blind.upcoming_boss_name if state.blind else ""
+        if not boss_name and state.ante_blinds:
+            for b in state.ante_blinds:
+                if b.type == "Boss":
+                    boss_name = b.name
+                    break
+        if boss_name and ("flint" in boss_name.lower() or "кремень" in boss_name.lower()):
+            flint_blind = state.blind.model_copy(update={"name": boss_name, "is_boss": True})
+            old_flint = engine.calculate_expected_hand_score(
+                sample_cards, hand_type=tested_hand_name, state=state.model_copy(update={"blind": flint_blind})
+            )
+            new_flint = engine.calculate_expected_hand_score(
+                sample_cards, hand_type=tested_hand_name, state=temp_state.model_copy(update={"blind": flint_blind})
+            )
+            lines.append(
+                f"- ⚠️ **VS UPCOMING BOSS THE FLINT (-50% Base)**: {old_flint.score:,} pts -> **{new_flint.score:,} pts** ({new_flint.score - old_flint.score:+,} pts/hand)"
+            )
 
     elif item.item_type == "Planet":
         lbl_lower = item.label.lower()
@@ -604,7 +747,7 @@ def execute_calculate_hand_odds(
     if not target_clean:
         return "Error: Please specify `target_poker_hand` (e.g. 'Flush', 'Straight', 'Full House', 'Pair')."
 
-    discard_ids = normalize_id_list(discard_card_ids)
+    discard_ids = resolve_card_ids(discard_card_ids, state.hand)
     if len(discard_ids) > 5:
         return f"Error: Cannot discard more than 5 cards (requested {len(discard_ids)})."
 
