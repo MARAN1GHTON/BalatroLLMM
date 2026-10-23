@@ -2126,26 +2126,64 @@ def serialize_game_state_to_markdown(
                     f"> 📊 **Round Trajectory**: {traj_str} (Target: {remaining_score:,} chips remaining, need ~{avg_req:,}/hand across {state.hands_left} hands)"
                 )
 
-                if state.discards_left <= 1 and state.hands_left >= 3:
-                    if state.discards_left == 1:
-                        lines.append(
-                            f"> ⚠️ **RESOURCE PACING REMINDER**: You have only **1 discard remaining** with **{state.hands_left} hands left**! "
-                            f"Keep in mind that using this discard will leave you with 0 discards for all remaining hands."
-                        )
-                    elif state.discards_left == 0:
-                        lines.append(
-                            f"> ℹ️ **RESOURCE PACING REMINDER**: You have **0 discards remaining** with **{state.hands_left} hands left**."
-                        )
+                if state.discards_left == 1 and state.hands_left >= 2 and top_score < remaining_score:
+                    made_five_card = top.hand_type in (
+                        "Flush",
+                        "Straight",
+                        "Full House",
+                        "Four of a Kind",
+                        "Straight Flush",
+                        "Five of a Kind",
+                        "Flush House",
+                        "Flush Five",
+                    )
+                    made_hint = (
+                        f" You already hold a made **{top.hand_type}** (~{top_score:,} pts)—do NOT burn your last discard chasing marginal kicker upgrades if you will need to draw another hand afterward!"
+                        if made_five_card and top_score >= avg_req * 0.6
+                        else " Keep in mind that using this discard will leave you with 0 discards for all remaining hands."
+                    )
+                    lines.append(
+                        f"> ⚠️ **RESOURCE PACING REMINDER**: You have only **1 discard remaining** with **{state.hands_left} hands left**!{made_hint}"
+                    )
+                elif state.discards_left == 0 and state.hands_left >= 2 and top_score < remaining_score:
+                    has_half_joker = any(
+                        not j.debuffed and ((j.key or "").lower() == "j_half" or "half joker" in (j.label or "").lower())
+                        for j in (state.jokers or [])
+                    )
+                    max_pad = 3 if has_half_joker else 5
+                    lines.append(
+                        f"> 💡 **CARD CYCLING / PSEUDO-DISCARD REMINDER (0 discards left, {state.hands_left} hands left)**: "
+                        f"You have **0 discards remaining** and cannot one-shot the blind this hand. "
+                        f"If you play a fallback hand (`High Card`, `Pair`, `Two Pair`), **NEVER play 1–2 cards alone 'for cleanliness'**! "
+                        f"Always pad `play_cards` up to {max_pad} cards by attaching dead/off-suit trash cards you don't want to keep "
+                        f"(for `High Card`, attach trash cards of **lower rank** than your scoring card so it stays the High Card) "
+                        f"to cycle them out for free and draw fresh cards for your remaining {state.hands_left - 1} hand(s)."
+                    )
 
             if candidate_hands:
+                has_splash = any(
+                    not j.debuffed and ((j.key or "").lower() == "j_splash" or "splash" in (j.label or "").lower())
+                    for j in (state.jokers or [])
+                )
                 lines.append("\n**Detected Hand Opportunities (Calculated with Active Jokers & Upgrades):**")
                 for cand in candidate_hands[:4]:
                     card_ids_str = ", ".join(c.id for c in cand.cards)
                     breakdown_str = " | ".join(cand.breakdown)
                     status_part = f" — {cand.threshold_status}" if cand.threshold_status else ""
+                    scoring_core = list(cand.cards) if has_splash else scoring_engine.get_scoring_cards(cand.cards, cand.hand_type)
+                    if 0 < len(scoring_core) < len(cand.cards):
+                        core_ids_set = {c.id for c in scoring_core}
+                        core_ids_str = ", ".join(c.id for c in scoring_core)
+                        kicker_ids_str = ", ".join(c.id for c in cand.cards if c.id not in core_ids_set)
+                        cards_line = (
+                            f"  └─ Cards: `[{card_ids_str}]` (Scoring Core: `[{core_ids_str}]` | "
+                            f"Non-Scoring Throwaways: `[{kicker_ids_str}]` — keep cards needed for next hand, attach dead cards to cycle!) | Synergy: [{breakdown_str}]"
+                        )
+                    else:
+                        cards_line = f"  └─ Cards: `[{card_ids_str}]` | Synergy: [{breakdown_str}]"
                     lines.append(
                         f"- **{cand.hand_type}** (~{cand.chips:,}c × {cand.mult:,}m = **~{cand.score:,} score**){status_part}\n"
-                        f"  └─ Cards: `[{card_ids_str}]` | Synergy: [{breakdown_str}]"
+                        f"{cards_line}"
                     )
 
             # Check if held-in-hand triggers or cards exist

@@ -215,8 +215,8 @@ class BalatroScoringEngine:
         state: GameState | None = None,
     ) -> list[CardModel]:
         """Orders played cards left-to-right to maximize Phase-1 scoring (e.g. placing the Photograph
-        face card or Glass card at index 0 when Hanging Chad is active, or placing +Mult cards before
-        XMult cards when Hanging Chad is not active)."""
+        face card, Fibonacci/Scholar/Ancient/Idol target, or Glass card at index 0 when Hanging Chad is
+        active, or placing +Mult cards before XMult cards when Hanging Chad is not active)."""
         if len(combo) <= 1:
             return list(combo)
         if hand_type is None:
@@ -226,7 +226,6 @@ class BalatroScoringEngine:
         has_splash = any((j.key or "").lower() == "j_splash" or "splash" in (j.label or "").lower() for j in active_jokers)
         has_chad = any((j.key or "").lower() == "j_hanging_chad" or "hanging chad" in (j.label or "").lower() or "chad" in (j.label or "").lower() for j in active_jokers)
         has_photo = any((j.key or "").lower() == "j_photograph" or "photograph" in (j.label or "").lower() for j in active_jokers)
-        has_triboulet = any((j.key or "").lower() == "j_triboulet" or "triboulet" in (j.label or "").lower() for j in active_jokers)
         has_pareidolia = any((j.key or "").lower() == "j_pareidolia" or "pareidolia" in (j.label or "").lower() for j in active_jokers)
 
         scoring_cards = list(combo) if has_splash else self.get_scoring_cards(combo, hand_type)
@@ -237,33 +236,121 @@ class BalatroScoringEngine:
             if c.debuffed:
                 return (1.0, 0.0, 0)
             c_rank = c.effective_rank if hasattr(c, "effective_rank") else c.rank
+            c_suit = c.effective_suit if hasattr(c, "effective_suit") else c.suit
             c_nom = c.effective_nominal if hasattr(c, "effective_nominal") else c.nominal
             is_face = has_pareidolia or (c.is_face_card if hasattr(c, "is_face_card") else c_rank in ("Jack", "Queen", "King"))
+            is_even = c_rank in ("2", "4", "6", "8", "10")
+            is_odd = c_rank in ("3", "5", "7", "9", "Ace")
+            is_fib = c_rank in ("Ace", "2", "3", "5", "8")
+            is_wild = c_suit == "Wild" or c.enhancement == "Wild"
+
             xm = float(c.x_mult) if c.x_mult > 1.0 else 1.0
             if c.edition and ("poly" in c.edition.lower() or "polychrome" in c.edition.lower()):
                 xm *= 1.5
-            if is_face and has_photo:
-                xm *= 2.0
-            if c_rank in ("King", "Queen") and has_triboulet:
-                xm *= 2.0
             m_add = float(c.mult_bonus)
             if c.edition and ("holo" in c.edition.lower() or "holographic" in c.edition.lower()):
                 m_add += 10.0
             c_add = int(c_nom + c.chip_bonus + (50 if (c.edition and "foil" in c.edition.lower()) else 0))
+
+            for j in active_jokers:
+                k = (j.key or "").lower()
+                lbl = (j.label or "").lower()
+
+                if is_face:
+                    if "scary face" in lbl or k == "j_scary_face":
+                        c_add += 30
+                    if "smiley face" in lbl or k == "j_smiley_face":
+                        m_add += 5.0
+                    if "photograph" in lbl or k == "j_photograph":
+                        xm *= 2.0
+                        if c.seal == "Red":
+                            xm *= 1.5  # Prioritize Red Seal face card as first_face_card_id for Photograph
+                    if ("triboulet" in lbl or k == "j_triboulet") and c_rank in ("King", "Queen"):
+                        xm *= 2.0
+
+                if is_even and ("even steven" in lbl or k == "j_even_steven"):
+                    m_add += 4.0
+                if is_odd and ("odd todd" in lbl or k == "j_odd_todd"):
+                    c_add += 31
+                if is_fib and ("fibonacci" in lbl or k == "j_fibonacci"):
+                    m_add += 8.0
+                if c_rank == "Ace" and ("scholar" in lbl or k == "j_scholar"):
+                    c_add += 20
+                    m_add += 4.0
+                if c_rank in ("10", "4") and ("walkie talkie" in lbl or k == "j_walkie_talkie"):
+                    c_add += 10
+                    m_add += 4.0
+                if "hiker" in lbl or k == "j_hiker":
+                    c_add += 5
+
+                if c_suit == "Diamonds" or is_wild:
+                    if "greedy" in lbl or k == "j_greedy_joker":
+                        m_add += 3.0
+                if c_suit == "Hearts" or is_wild:
+                    if "lusty" in lbl or k == "j_lusty_joker":
+                        m_add += 3.0
+                    if "bloodstone" in lbl or k == "j_bloodstone":
+                        xm *= 1.5
+                if c_suit == "Spades" or is_wild:
+                    if "wrathful" in lbl or k == "j_wrathful_joker":
+                        m_add += 3.0
+                    if "arrowhead" in lbl or k == "j_arrowhead":
+                        c_add += 50
+                if c_suit == "Clubs" or is_wild:
+                    if "gluttonous" in lbl or k == "j_gluttonous_joker":
+                        m_add += 3.0
+                    if "onyx agate" in lbl or k == "j_onyx_agate":
+                        m_add += 7.0
+
+                if "ancient" in lbl or k == "j_ancient":
+                    ancient_suit = getattr(j, "target_suit", None)
+                    if not ancient_suit and j.effect_desc:
+                        m_suit = re.search(r"\b(Hearts|Diamonds|Clubs|Spades|черв[ыа]|бубн[ыа]|треф[ыа]|пик[иа])\b", j.effect_desc, re.I)
+                        if m_suit:
+                            raw_s = m_suit.group(1).lower()
+                            if "черв" in raw_s or "heart" in raw_s:
+                                ancient_suit = "Hearts"
+                            elif "бубн" in raw_s or "diamond" in raw_s:
+                                ancient_suit = "Diamonds"
+                            elif "треф" in raw_s or "club" in raw_s:
+                                ancient_suit = "Clubs"
+                            elif "пик" in raw_s or "spade" in raw_s:
+                                ancient_suit = "Spades"
+                    if ancient_suit and (c_suit == ancient_suit or is_wild):
+                        xm *= 1.5
+
+                if "idol" in lbl or k == "j_idol":
+                    idol_suit = getattr(j, "target_suit", None)
+                    idol_rank = getattr(j, "target_rank", None)
+                    if idol_suit and idol_rank and (c_suit == idol_suit or is_wild) and c_rank == idol_rank:
+                        xm *= 2.0
+
             return (xm, m_add, c_add)
 
         if has_chad and scoring_cards:
             # Put the card that benefits most from +2 retriggers at index 0
             best_first = max(scoring_cards, key=lambda c: (card_metrics(c)[0], card_metrics(c)[1], card_metrics(c)[2]))
             rest = [c for c in scoring_cards if c.id != best_first.id]
-            # Order rest so +Mult cards come before XMult cards
-            rest.sort(key=lambda c: (1 if card_metrics(c)[0] > 1.0 else 0, -card_metrics(c)[1], card_metrics(c)[0]))
+            # Order rest so +Mult cards come before XMult cards (and strongest face card first if Photograph is active)
+            rest.sort(
+                key=lambda c: (
+                    1 if card_metrics(c)[0] > 1.0 else 0,
+                    -card_metrics(c)[1],
+                    -card_metrics(c)[0] if has_photo else card_metrics(c)[0],
+                    -card_metrics(c)[2],
+                )
+            )
             return [best_first] + rest + non_scoring
         else:
             # Order so non-XMult (+Mult) cards trigger before XMult cards
             ordered_scoring = sorted(
                 scoring_cards,
-                key=lambda c: (1 if card_metrics(c)[0] > 1.0 else 0, -card_metrics(c)[1], -card_metrics(c)[2]),
+                key=lambda c: (
+                    1 if card_metrics(c)[0] > 1.0 else 0,
+                    -card_metrics(c)[1],
+                    -card_metrics(c)[0],
+                    -card_metrics(c)[2],
+                ),
             )
             return ordered_scoring + non_scoring
 

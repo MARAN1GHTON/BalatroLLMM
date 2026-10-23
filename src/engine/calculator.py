@@ -371,6 +371,8 @@ def execute_simulate_hand(card_ids: Any, state: GameState | None = None) -> str:
 
     engine = BalatroScoringEngine()
     res = engine.calculate_expected_hand_score(chosen_cards, state=state)
+    opt_cards = engine.optimize_card_order_for_scoring(chosen_cards, hand_type=res.hand_type, state=state)
+    opt_res = engine.calculate_expected_hand_score(opt_cards, hand_type=res.hand_type, state=state)
 
     cards_desc = ", ".join(
         f"{c.rank}{c.suit[0]}" + (f"[{c.enhancement}]" if c.enhancement else "") for c in chosen_cards
@@ -393,6 +395,15 @@ def execute_simulate_hand(card_ids: Any, state: GameState | None = None) -> str:
         f"Blind Progress: Target {state.target_score:,} | Current {state.current_score:,} | Needed: {needed:,}",
     ]
 
+    if opt_res.score > res.score:
+        opt_ids_str = ", ".join(f"'{c.id}'" for c in opt_cards)
+        opt_desc = ", ".join(f"{c.rank}{c.suit[0]}" for c in opt_cards)
+        output.append(
+            f"💡 **OPTIMAL CARD ORDER AVAILABLE**: Passing `[{opt_ids_str}]` ({opt_desc}) instead yields "
+            f"**{opt_res.chips:,} Chips × {opt_res.mult:,} Mult = {opt_res.score:,} Total Points** "
+            f"(+{opt_res.score - res.score:,} pts from left-to-right trigger / Hanging Chad / Photograph ordering)!"
+        )
+
     if needed == 0:
         output.append("Status: 🎯 Blind is ALREADY beaten!")
     elif one_shot:
@@ -405,6 +416,25 @@ def execute_simulate_hand(card_ids: Any, state: GameState | None = None) -> str:
             f"Verdict: ⚠️ Does NOT defeat blind in 1 hand ({pct:.1f}% of needed). Deficit: {needed - res.score:,}. "
             f"Requires ~{hands_req} hands at this exact scoring pace (Hands remaining: {state.hands_left})."
         )
+        has_half_joker = any(
+            not j.debuffed and ((j.key or "").lower() == "j_half" or "half joker" in (j.label or "").lower())
+            for j in (state.jokers or [])
+        )
+        max_pad = 3 if has_half_joker else 5
+        if (
+            state.discards_left == 0
+            and state.hands_left > 1
+            and len(chosen_cards) < max_pad
+            and len(state.hand) > len(chosen_cards)
+        ):
+            extra_slots = min(max_pad - len(chosen_cards), len(state.hand) - len(chosen_cards))
+            rank_hint = " (of LOWER rank than your scoring card so it stays the High Card)" if res.hand_type == "High Card" else ""
+            output.append(
+                f"💡 **CARD CYCLING / PSEUDO-DISCARD TIP (0 discards left, {state.hands_left} hands left)**: "
+                f"Playing only {len(chosen_cards)} card(s) will draw only {len(chosen_cards)} replacement card(s) next turn. "
+                f"Do NOT play a {len(chosen_cards)}-card {res.hand_type} 'for cleanliness'—attach up to {extra_slots} dead/off-suit trash card(s){rank_hint} "
+                f"to `play_cards` so they get cycled out for free and draw fresh cards for your remaining {state.hands_left - 1} hand(s)!"
+            )
 
     # Inactive Hand-Locked Jokers Warning
     HAND_LOCKED_JOKERS = {

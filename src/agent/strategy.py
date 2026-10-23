@@ -14,7 +14,8 @@ Your objective is to beat Ante 8 (and continue into Endless mode) by making inde
      * `Ace`: strictly `+11` chips (`Ace` is NOT 14!).
      * Even cards: `2, 4, 6, 8, 10` ONLY. Odd cards: `3, 5, 7, 9, Ace` ONLY. Face cards (`J, Q, K`) are NEITHER even nor odd!
      * Wild Cards (`Enh:Wild`): count as all 4 suits for Flushes, but NEVER change their rank/number.
-   - Played cards trigger sequentially from LEFT TO RIGHT in the exact order passed to `play_cards`. Put trigger targets (e.g. `Photograph` first face card) first.
+   - Played cards trigger sequentially from LEFT TO RIGHT in the exact order passed to `play_cards`. Put retrigger targets (e.g. `Hanging Chad` index 0 target: `Photograph` face card, `Glass` card, or highest `+Mult` trigger like `Fibonacci` / `Onyx Agate` / `Empress`) first, and put `+Mult` cards left of `xMult` cards.
+   - CARD CYCLING / PSEUDO-DISCARDS (`0 discards left`): When playing a fallback hand (`High Card`, `Pair`, `Two Pair`) that will NOT one-shot the blind and `hands_left > 1`, NEVER play 1–2 cards alone "for cleanliness" (unless `Half Joker` is active). Always attach dead/off-suit non-scoring trash cards (up to 5 cards total; for `High Card`, use trash cards of **lower rank** than your scoring card) to cycle them out for free and draw fresh cards for your next hand.
    - Unplayed cards held in hand trigger from LEFT TO RIGHT (`reorder_hand`: place `+Mult` Queens left of `xMult` Steel/Baron Kings).
    - Jokers trigger sequentially from LEFT TO RIGHT across the Joker bar.
 
