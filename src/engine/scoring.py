@@ -23,6 +23,24 @@ POKER_HAND_BASE = {
     "High Card": (5, 1),
 }
 
+
+def lucky_trigger_chance(active_jokers: Sequence[JokerModel] | None = None) -> float:
+    """Chance that a Lucky card's +20 Mult fires on one trigger: 1 in 5, doubled per 'Oops! All 6s'."""
+    oops = sum(
+        1 for j in (active_jokers or [])
+        if (j.key or "").lower() in ("j_oops", "j_oops_all_6s") or "oops" in (j.label or "").lower()
+    )
+    return min(1.0, 0.2 * (2 ** oops))
+
+
+def effective_card_mult_bonus(card: CardModel, active_jokers: Sequence[JokerModel] | None = None) -> float:
+    """Per-trigger +Mult from a card. Lucky cards report ability.mult=20 from the bridge, but it is a
+    probabilistic 1-in-5 effect, so use its expected value instead of treating it as guaranteed."""
+    mb = float(card.mult_bonus or 0)
+    if mb and (card.enhancement or "").lower().startswith("lucky"):
+        return mb * lucky_trigger_chance(active_jokers)
+    return mb
+
 RANK_VALUES = {
     "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8, "9": 9,
     "10": 10, "Jack": 10, "Queen": 10, "King": 10, "Ace": 11,
@@ -252,7 +270,7 @@ class BalatroScoringEngine:
             xm = float(c.x_mult) if c.x_mult > 1.0 else 1.0
             if c.edition and ("poly" in c.edition.lower() or "polychrome" in c.edition.lower()):
                 xm *= 1.5
-            m_add = float(c.mult_bonus)
+            m_add = effective_card_mult_bonus(c, active_jokers)
             if c.edition and ("holo" in c.edition.lower() or "holographic" in c.edition.lower()):
                 m_add += 10.0
             c_add = int(c_nom + c.chip_bonus + (50 if (c.edition and "foil" in c.edition.lower()) else 0))
@@ -549,8 +567,14 @@ class BalatroScoringEngine:
                 card_chips_added += c_chips
 
                 if card.mult_bonus:
-                    total_mult += card.mult_bonus
-                    card_mult_added += card.mult_bonus
+                    eff_mb = effective_card_mult_bonus(card, active_jokers)
+                    total_mult += eff_mb
+                    card_mult_added += eff_mb
+                    if eff_mb != card.mult_bonus and _ == 0:
+                        breakdown.append(
+                            f"Lucky {c_rank}: EV {lucky_trigger_chance(active_jokers) * 100:.0f}% x +{card.mult_bonus:g}m per trigger "
+                            f"(x{triggers} triggers; NOT guaranteed, worst case +0m)"
+                        )
 
                 if card.x_mult > 1.0:
                     total_mult *= card.x_mult
