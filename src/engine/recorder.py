@@ -821,6 +821,20 @@ class BalatroRunRecorder:
                 critical_notes.append(
                     f"- ❌ **Ошибка вызова инструмента (Шаг {s.step}, Ante {s.ante}-{s.round})**: `{s.action_name}` отклонён (`{s.error_message}`)."
                 )
+            if s.action_name == "play_cards":
+                played_cids = s.action_args.get("card_ids") or []
+                if (
+                    isinstance(played_cids, list)
+                    and 0 < len(played_cids) <= 2
+                    and s.discards_left == 0
+                    and s.hands_left > 1
+                    and (s.score + s.score_delta) < s.target_score
+                ):
+                    critical_notes.append(
+                        f"- ♻️ **Упущенный псевдо-сброс / прокрутка колоды (Шаг {s.step}, Ante {s.ante}-{s.round})**: "
+                        f"При 0 сбросов и {s.hands_left} оставшихся руках сыграно всего {len(played_cids)} карт(ы) (`{played_cids}`), "
+                        f"из-за чего к следующей руке добралось только {len(played_cids)} новых карт вместо бесплатной прокрутки мусорных карт балластом (незачётные кикеры без Splash очков не дают, но бесплатно обновляют руку!)."
+                    )
         if self.total_calculation_turns == 0:
             critical_notes.append(
                 "- 🧮 **Игнорирование калькуляторов**: За весь забег ты **0 раз** вызвал `simulate_hand`, `simulate_shop_buy`, `calculate_hand_odds` или `python_eval`."
