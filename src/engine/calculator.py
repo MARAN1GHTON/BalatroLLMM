@@ -340,6 +340,58 @@ def execute_python_eval(code: str, state: GameState | None = None) -> str:
         sys.stdout = old_stdout
 
 
+_HAND_LOCKED_SPECS: dict[str, tuple[str, tuple[str, ...]]] = {
+    "j_clever": ("Two Pair", ("clever joker", "clever")),
+    "j_mad": ("Two Pair", ("mad joker", "mad")),
+    "j_spare_trousers": ("Two Pair", ("spare trousers",)),
+    "j_sly": ("Pair", ("sly joker", "sly")),
+    "j_jolly": ("Pair", ("jolly joker", "jolly")),
+    "j_the_duo": ("Pair", ("the duo", "duo")),
+    "j_wily": ("Three of a Kind", ("wily joker", "wily")),
+    "j_zany": ("Three of a Kind", ("zany joker", "zany")),
+    "j_the_trio": ("Three of a Kind", ("the trio", "trio")),
+    "j_the_family": ("Four of a Kind", ("the family", "family")),
+    "j_devious": ("Straight", ("devious joker", "devious")),
+    "j_crazy": ("Straight", ("crazy joker", "crazy")),
+    "j_the_order": ("Straight", ("the order", "order")),
+    "j_runner": ("Straight", ("runner",)),
+    "j_crafty": ("Flush", ("crafty joker", "crafty")),
+    "j_droll": ("Flush", ("droll joker", "droll")),
+    "j_the_tribe": ("Flush", ("the tribe", "tribe")),
+}
+
+
+def _match_hand_locked_joker(joker: Any) -> str | None:
+    """Returns required hand type if joker is a hand-locked joker (without substring collisions like 'mad' in 'madness')."""
+    k = (getattr(joker, "key", "") or "").lower().strip()
+    lbl = (getattr(joker, "label", "") or "").lower().strip()
+    for key, (req_hand, aliases) in _HAND_LOCKED_SPECS.items():
+        if k == key or lbl in aliases or any(a in lbl for a in aliases if " " in a):
+            return req_hand
+    return None
+
+
+def _hand_contains_required_type(played_hand: str, req_hand: str) -> bool:
+    """Checks if `played_hand` contains `req_hand` under Balatro's hand-containment rules (e.g. Full House contains Pair, Two Pair, Three of a Kind)."""
+    ph = (played_hand or "").strip().lower()
+    rh = (req_hand or "").strip().lower()
+    if ph == rh:
+        return True
+    if rh == "pair":
+        return ph in ("pair", "two pair", "three of a kind", "full house", "four of a kind", "five of a kind", "flush house", "flush five")
+    if rh == "two pair":
+        return ph in ("two pair", "full house", "flush house")
+    if rh == "three of a kind":
+        return ph in ("three of a kind", "full house", "four of a kind", "five of a kind", "flush house", "flush five")
+    if rh == "four of a kind":
+        return ph in ("four of a kind", "five of a kind", "flush five")
+    if rh == "straight":
+        return ph in ("straight", "straight flush", "royal flush")
+    if rh == "flush":
+        return ph in ("flush", "straight flush", "royal flush", "flush house", "flush five")
+    return False
+
+
 def execute_simulate_hand(card_ids: Any, state: GameState | None = None) -> str:
     """Simulates playing a candidate card combination from hand, projecting exact
 
@@ -437,34 +489,11 @@ def execute_simulate_hand(card_ids: Any, state: GameState | None = None) -> str:
             )
 
     # Inactive Hand-Locked Jokers Warning
-    HAND_LOCKED_JOKERS = {
-        "j_clever": "Two Pair",
-        "j_mad": "Two Pair",
-        "j_spare_trousers": "Two Pair",
-        "j_sly": "Pair",
-        "j_jolly": "Pair",
-        "j_the_duo": "Pair",
-        "j_wily": "Three of a Kind",
-        "j_zany": "Three of a Kind",
-        "j_the_trio": "Three of a Kind",
-        "j_the_family": "Four of a Kind",
-        "j_devious": "Straight",
-        "j_crazy": "Straight",
-        "j_the_order": "Straight",
-        "j_runner": "Straight",
-        "j_crafty": "Flush",
-        "j_droll": "Flush",
-        "j_the_tribe": "Flush",
-    }
     inactive_jokers = []
     for j in state.jokers:
-        k = (j.key or "").lower()
-        lbl = (j.label or "").lower()
-        for key, req_hand in HAND_LOCKED_JOKERS.items():
-            if k == key or key.replace("j_", "").replace("_", " ") in lbl:
-                if res.hand_type != req_hand:
-                    inactive_jokers.append(f"{j.label} (requires {req_hand}, but played {res.hand_type})")
-                break
+        req_hand = _match_hand_locked_joker(j)
+        if req_hand and not _hand_contains_required_type(res.hand_type, req_hand):
+            inactive_jokers.append(f"{j.label} (requires {req_hand}, but played {res.hand_type})")
 
     if inactive_jokers:
         output.append(f"⚠️ **INACTIVE JOKERS IN THIS HAND**: {', '.join(inactive_jokers)}!")
@@ -831,23 +860,11 @@ def execute_calculate_hand_odds(
         ]
 
         # Check for hand-locked jokers incompatible with Flush
-        HAND_LOCKED_JOKERS = {
-            "j_clever": "Two Pair", "j_mad": "Two Pair", "j_spare_trousers": "Two Pair",
-            "j_sly": "Pair", "j_jolly": "Pair", "j_the_duo": "Pair",
-            "j_wily": "Three of a Kind", "j_zany": "Three of a Kind", "j_the_trio": "Three of a Kind",
-            "j_the_family": "Four of a Kind", "j_devious": "Straight", "j_crazy": "Straight",
-            "j_the_order": "Straight", "j_runner": "Straight", "j_crafty": "Flush", "j_droll": "Flush",
-            "j_the_tribe": "Flush",
-        }
         synergy_mismatches = []
         for j in state.jokers:
-            k = (j.key or "").lower()
-            lbl = (j.label or "").lower()
-            for key, req_hand in HAND_LOCKED_JOKERS.items():
-                if k == key or key.replace("j_", "").replace("_", " ") in lbl:
-                    if req_hand.lower() != "flush":
-                        synergy_mismatches.append(f"{j.label} (requires {req_hand})")
-                    break
+            req_hand = _match_hand_locked_joker(j)
+            if req_hand and not _hand_contains_required_type("Flush", req_hand):
+                synergy_mismatches.append(f"{j.label} (requires {req_hand})")
         if synergy_mismatches:
             flush_lines.append(
                 f"\n⚠️ **SYNERGY MISMATCH WARNING**: You are digging for a **Flush**, but your build has: {', '.join(synergy_mismatches)}! "
@@ -921,23 +938,11 @@ def execute_calculate_hand_odds(
         lines.append("Assessment: 🔴 **High Risk** (<30% chance). Consider keeping existing pairs/chips instead.")
 
     # Check for hand-locked jokers incompatible with target_clean
-    HAND_LOCKED_JOKERS = {
-        "j_clever": "Two Pair", "j_mad": "Two Pair", "j_spare_trousers": "Two Pair",
-        "j_sly": "Pair", "j_jolly": "Pair", "j_the_duo": "Pair",
-        "j_wily": "Three of a Kind", "j_zany": "Three of a Kind", "j_the_trio": "Three of a Kind",
-        "j_the_family": "Four of a Kind", "j_devious": "Straight", "j_crazy": "Straight",
-        "j_the_order": "Straight", "j_runner": "Straight", "j_crafty": "Flush", "j_droll": "Flush",
-        "j_the_tribe": "Flush",
-    }
     synergy_mismatches = []
     for j in state.jokers:
-        k = (j.key or "").lower()
-        lbl = (j.label or "").lower()
-        for key, req_hand in HAND_LOCKED_JOKERS.items():
-            if k == key or key.replace("j_", "").replace("_", " ") in lbl:
-                if req_hand.lower() != target_clean.lower():
-                    synergy_mismatches.append(f"{j.label} (requires {req_hand})")
-                break
+        req_hand = _match_hand_locked_joker(j)
+        if req_hand and not _hand_contains_required_type(target_clean, req_hand):
+            synergy_mismatches.append(f"{j.label} (requires {req_hand})")
     if synergy_mismatches:
         lines.append(
             f"\n⚠️ **SYNERGY MISMATCH WARNING**: You are digging for **{target_clean}**, but your Joker build has: {', '.join(synergy_mismatches)}! "

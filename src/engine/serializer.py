@@ -93,7 +93,7 @@ KNOWN_JOKER_CLEAN_DESCS: dict[str, str] = {
     "j_hologram": "Gains X0.25 Mult per playing card added to deck (⚠️ Starts at base X1.0 Mult; gives NO boost until cards are added!)",
     "j_obelisk": "Gains X0.2 Mult per consecutive hand played without playing your most played hand (⚠️ Starts at base X1.0 Mult)",
     "j_vampire": "Gains X0.1 Mult per scoring Enhanced card played, removes card enhancement (⚠️ Starts at base X1.0 Mult)",
-    "j_madness": "Gains X0.5 Mult when Small or Big Blind is selected, destroys a random Joker (⚠️ Starts at base X1.0 Mult)",
+    "j_madness": "Gains X0.5 Mult when Small or Big Blind is selected, destroys a random non-Eternal Joker (⚠️ Starts at base X1.0 Mult; on White/Red/Green/Blue Stake where Eternal Jokers do not exist, it WILL cannibalize 1 of your Jokers every Small and Big Blind unless skipped!)",
     "j_campfire": "Gains X0.25 Mult for each card sold, resets when Boss Blind is defeated (⚠️ Starts at base X1.0 Mult)",
     "j_throwback": "Gains X0.25 Mult for each Blind skipped this run (⚠️ Starts at base X1.0 Mult)",
     "j_glass": "Gains X0.75 Mult for every Glass Card that breaks (⚠️ Starts at base X1.0 Mult)",
@@ -637,56 +637,80 @@ def check_build_balance(state: GameState) -> list[str]:
     return warnings
 
 
-HAND_LOCKED_JOKERS = {
+HAND_LOCKED_JOKERS: dict[str, tuple[str, str, tuple[str, ...]]] = {
     # Two Pair
-    "j_clever": ("Two Pair", "+80 Chips"),
-    "j_mad": ("Two Pair", "+10 Mult"),
-    "j_spare_trousers": ("Two Pair", "Gains +2 Mult if hand contains Two Pair"),
+    "j_clever": ("Two Pair", "+80 Chips", ("clever joker", "clever")),
+    "j_mad": ("Two Pair", "+10 Mult", ("mad joker", "mad")),
+    "j_spare_trousers": ("Two Pair", "Gains +2 Mult if hand contains Two Pair", ("spare trousers",)),
     # Pair
-    "j_sly": ("Pair", "+50 Chips"),
-    "j_jolly": ("Pair", "+8 Mult"),
-    "j_the_duo": ("Pair", "x2 Mult"),
+    "j_sly": ("Pair", "+50 Chips", ("sly joker", "sly")),
+    "j_jolly": ("Pair", "+8 Mult", ("jolly joker", "jolly")),
+    "j_the_duo": ("Pair", "x2 Mult", ("the duo", "duo")),
     # Three of a Kind
-    "j_wily": ("Three of a Kind", "+100 Chips"),
-    "j_zany": ("Three of a Kind", "+12 Mult"),
-    "j_the_trio": ("Three of a Kind", "x3 Mult"),
+    "j_wily": ("Three of a Kind", "+100 Chips", ("wily joker", "wily")),
+    "j_zany": ("Three of a Kind", "+12 Mult", ("zany joker", "zany")),
+    "j_the_trio": ("Three of a Kind", "x3 Mult", ("the trio", "trio")),
     # Four of a Kind
-    "j_the_family": ("Four of a Kind", "x4 Mult"),
+    "j_the_family": ("Four of a Kind", "x4 Mult", ("the family", "family")),
     # Straight
-    "j_devious": ("Straight", "+100 Chips"),
-    "j_crazy": ("Straight", "+12 Mult"),
-    "j_the_order": ("Straight", "x3 Mult"),
-    "j_runner": ("Straight", "Gains +15 Chips if hand contains Straight"),
-    "j_superposition": ("Straight", "Create Tarot if Straight contains Ace"),
+    "j_devious": ("Straight", "+100 Chips", ("devious joker", "devious")),
+    "j_crazy": ("Straight", "+12 Mult", ("crazy joker", "crazy")),
+    "j_the_order": ("Straight", "x3 Mult", ("the order", "order")),
+    "j_runner": ("Straight", "Gains +15 Chips if hand contains Straight", ("runner",)),
+    "j_superposition": ("Straight", "Create Tarot if Straight contains Ace", ("superposition",)),
     # Flush
-    "j_crafty": ("Flush", "+80 Chips"),
-    "j_droll": ("Flush", "+10 Mult"),
-    "j_the_tribe": ("Flush", "x2 Mult"),
-    # Full House
-    "j_half": ("Three or fewer cards", "+20 Mult"),
+    "j_crafty": ("Flush", "+80 Chips", ("crafty joker", "crafty")),
+    "j_droll": ("Flush", "+10 Mult", ("droll joker", "droll")),
+    "j_the_tribe": ("Flush", "x2 Mult", ("the tribe", "tribe")),
+    # 3 or fewer cards
+    "j_half": ("Three or fewer cards", "+20 Mult", ("half joker", "half")),
 }
+
+
+def _hand_satisfies_locked_req(played_hand: str, req_hand: str) -> bool:
+    """Checks if `played_hand` satisfies `req_hand` under Balatro's hand containment rules."""
+    ph = (played_hand or "").strip().lower()
+    rh = (req_hand or "").strip().lower()
+    if ph == rh:
+        return True
+    if rh == "pair":
+        return ph in ("pair", "two pair", "three of a kind", "full house", "four of a kind", "five of a kind", "flush house", "flush five")
+    if rh == "two pair":
+        return ph in ("two pair", "full house", "flush house")
+    if rh == "three of a kind":
+        return ph in ("three of a kind", "full house", "four of a kind", "five of a kind", "flush house", "flush five")
+    if rh == "four of a kind":
+        return ph in ("four of a kind", "five of a kind", "flush five")
+    if rh == "straight":
+        return ph in ("straight", "straight flush", "royal flush")
+    if rh == "flush":
+        return ph in ("flush", "straight flush", "royal flush", "flush house", "flush five")
+    if rh == "three or fewer cards":
+        return ph in ("high card", "pair", "three of a kind")
+    return False
 
 
 def check_hand_locked_jokers(state: GameState, primary_hand: str) -> list[str]:
     """Checks if active Jokers require specific hand types that differ from the current plan or hand."""
     locked = {}
     for j in state.jokers:
-        k = (j.key or "").lower()
-        lbl = (j.label or "").lower()
-        for key, (h_type, bonus_txt) in HAND_LOCKED_JOKERS.items():
-            if k == key or key.replace("j_", "").replace("_", " ") in lbl:
+        k = (j.key or "").lower().strip()
+        lbl = (j.label or "").lower().strip()
+        for key, (h_type, bonus_txt, aliases) in HAND_LOCKED_JOKERS.items():
+            if k == key or lbl in aliases or any(a in lbl for a in aliases if " " in a):
                 locked[j.label] = (h_type, bonus_txt)
                 break
     alerts = []
     if locked:
-        hand_types_supported = {h_type for h_type, _ in locked.values()}
         summary = ", ".join(f"**{j_name}** (requires *{h_type}* for {bonus})" for j_name, (h_type, bonus) in locked.items())
         alerts.append(f"🔒 **HAND-LOCKED JOKERS IN BUILD**: {summary}.")
-        if primary_hand and primary_hand not in hand_types_supported:
-            alerts.append(
-                f"⚠️ **SYNERGY MISMATCH**: Your primary hand is **{primary_hand}**, but you have Jokers locked to **{', '.join(hand_types_supported)}**! "
-                f"Playing {primary_hand} will DEACTIVATE these jokers (+0 effect)! Either build towards {', '.join(hand_types_supported)} or replace them in the shop."
-            )
+        if primary_hand:
+            mismatched_reqs = sorted({h_type for h_type, _ in locked.values() if not _hand_satisfies_locked_req(primary_hand, h_type)})
+            if mismatched_reqs:
+                alerts.append(
+                    f"⚠️ **SYNERGY MISMATCH**: Your primary hand is **{primary_hand}**, but you have Jokers locked to **{', '.join(mismatched_reqs)}**! "
+                    f"Playing {primary_hand} will DEACTIVATE these jokers (+0 effect)! Either build towards {', '.join(mismatched_reqs)} or replace them in the shop."
+                )
     return alerts
 
 

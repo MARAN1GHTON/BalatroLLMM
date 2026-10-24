@@ -224,7 +224,12 @@ class BalatroScoringEngine:
 
         active_jokers = self._resolve_effective_jokers([j for j in (state.jokers if state else []) if not j.debuffed])
         has_splash = any((j.key or "").lower() == "j_splash" or "splash" in (j.label or "").lower() for j in active_jokers)
-        has_chad = any((j.key or "").lower() == "j_hanging_chad" or "hanging chad" in (j.label or "").lower() or "chad" in (j.label or "").lower() for j in active_jokers)
+        has_chad = any(
+            (j.key or "").lower() == "j_hanging_chad"
+            or "hanging chad" in (j.label or "").lower()
+            or (j.label or "").lower() == "chad"
+            for j in active_jokers
+        )
         has_photo = any((j.key or "").lower() == "j_photograph" or "photograph" in (j.label or "").lower() for j in active_jokers)
         has_pareidolia = any((j.key or "").lower() == "j_pareidolia" or "pareidolia" in (j.label or "").lower() for j in active_jokers)
 
@@ -496,7 +501,9 @@ class BalatroScoringEngine:
         )
         chad_count = sum(
             1 for j in active_jokers
-            if (j.key or "").lower() == "j_hanging_chad" or "hanging chad" in (j.label or "").lower() or "chad" in (j.label or "").lower()
+            if (j.key or "").lower() == "j_hanging_chad"
+            or "hanging chad" in (j.label or "").lower()
+            or (j.label or "").lower() == "chad"
         )
         seltzer_count = sum(
             1 for j in active_jokers
@@ -731,64 +738,64 @@ class BalatroScoringEngine:
                 total_mult += 10
                 breakdown.append(f"{j.label}(Holo): +10m")
 
-            # Hand-Type Specific Jokers
+            # Hand-Type Specific Jokers (use exact label / full joker name to avoid collisions like "mad" in "madness")
             if contains_pair:
-                if "jolly" in lbl or k == "j_jolly":
+                if "jolly joker" in lbl or lbl == "jolly" or k == "j_jolly":
                     total_mult += 8
                     breakdown.append("Jolly: +8m")
-                elif "sly" in lbl or k == "j_sly":
+                elif "sly joker" in lbl or lbl == "sly" or k == "j_sly":
                     total_chips += 50
                     breakdown.append("Sly: +50c")
-                elif "the duo" in lbl or k in ("j_duo", "j_the_duo"):
+                elif "the duo" in lbl or lbl == "duo" or k in ("j_duo", "j_the_duo"):
                     total_mult *= 2.0
                     breakdown.append("The Duo: X2")
 
             if contains_two_pair:
-                if "mad" in lbl or k == "j_mad":
+                if "mad joker" in lbl or lbl == "mad" or k == "j_mad":
                     total_mult += 10
                     breakdown.append("Mad: +10m")
-                elif "clever" in lbl or k == "j_clever":
+                elif "clever joker" in lbl or lbl == "clever" or k == "j_clever":
                     total_chips += 80
                     breakdown.append("Clever: +80c")
 
             if contains_three:
-                if "zany" in lbl or k == "j_zany":
+                if "zany joker" in lbl or lbl == "zany" or k == "j_zany":
                     total_mult += 12
                     breakdown.append("Zany: +12m")
-                elif "wily" in lbl or k == "j_wily":
+                elif "wily joker" in lbl or lbl == "wily" or k == "j_wily":
                     total_chips += 100
                     breakdown.append("Wily: +100c")
-                elif "the trio" in lbl or k in ("j_trio", "j_the_trio"):
+                elif "the trio" in lbl or lbl == "trio" or k in ("j_trio", "j_the_trio"):
                     total_mult *= 3.0
                     breakdown.append("The Trio: X3")
 
             if contains_straight:
-                if "crazy" in lbl or k == "j_crazy":
+                if "crazy joker" in lbl or lbl == "crazy" or k == "j_crazy":
                     total_mult += 12
                     breakdown.append("Crazy: +12m")
-                elif "devious" in lbl or k == "j_devious":
+                elif "devious joker" in lbl or lbl == "devious" or k == "j_devious":
                     total_chips += 100
                     breakdown.append("Devious: +100c")
-                elif "the order" in lbl or k in ("j_order", "j_the_order"):
+                elif "the order" in lbl or lbl == "order" or k in ("j_order", "j_the_order"):
                     total_mult *= 3.0
                     breakdown.append("The Order: X3")
 
             if contains_flush:
-                if "droll" in lbl or k == "j_droll":
+                if "droll joker" in lbl or lbl == "droll" or k == "j_droll":
                     total_mult += 10
                     breakdown.append("Droll: +10m")
-                elif "crafty" in lbl or k == "j_crafty":
+                elif "crafty joker" in lbl or lbl == "crafty" or k == "j_crafty":
                     total_chips += 80
                     breakdown.append("Crafty: +80c")
-                elif "the tribe" in lbl or k in ("j_tribe", "j_the_tribe"):
+                elif "the tribe" in lbl or lbl == "tribe" or k in ("j_tribe", "j_the_tribe"):
                     total_mult *= 2.0
                     breakdown.append("The Tribe: X2")
 
-            if contains_four and ("the family" in lbl or k in ("j_family", "j_the_family")):
+            if contains_four and ("the family" in lbl or lbl == "family" or k in ("j_family", "j_the_family")):
                 total_mult *= 4.0
                 breakdown.append("The Family: X4")
 
-            if len(cards) <= 3 and ("half" in lbl or k == "j_half"):
+            if len(cards) <= 3 and ("half joker" in lbl or lbl == "half" or k == "j_half"):
                 total_mult += 20
                 breakdown.append("Half: +20m")
 
