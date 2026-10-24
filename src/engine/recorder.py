@@ -602,13 +602,6 @@ class BalatroRunRecorder:
         md.append(f"- **Total Hands Played**: **{self.total_hands_played}** | **Total Discards Used**: **{self.total_discards_used}**")
         md.append(f"- **Shop Rerolls**: **{self.total_rerolls}** | **Items Purchased**: **{len(self.purchases)}**\n")
 
-        # Exclusive Post-Game Interview with AI Player
-        if self.interview:
-            md.append("## 🎙️ Эксклюзивное послематчевое интервью с игроком")
-            md.append(f"> *Флеш-интервью взято сразу после финала забега у модели `{self.model}`:*\n")
-            md.append(self.interview)
-            md.append("\n---\n")
-
         # Token Consumption & Efficiency Overview
         avg_tokens = self.total_tokens // max(1, len(self.steps))
         avg_prompt = self.total_prompt_tokens // max(1, len(self.steps))
@@ -717,6 +710,13 @@ class BalatroRunRecorder:
                 md.append("")
         except Exception as e:
             logger.debug("Failed to append lorebook summary to markdown report: %s", e)
+
+        # Exclusive Post-Game Interview with AI Player
+        if self.interview:
+            md.append("## 🎙️ Эксклюзивное послематчевое интервью с игроком")
+            md.append(f"> *Флеш-интервью взято сразу после финала забега у модели `{self.model}`:*\n")
+            md.append(self.interview)
+            md.append("\n---\n")
 
         # Step-by-Step Tactical Chronicle
         md.append("## 📜 Chronological Turn-by-Turn Replay")
