@@ -765,12 +765,13 @@ class BalatroRunRecorder:
         final_ante = last_step.ante if last_step else 1
         final_round = last_step.round if last_step else 1
         final_bank = last_step.bank if last_step else 0
+        final_score = (last_step.score + last_step.score_delta) if (last_step and last_step.action_name == "play_cards") else (last_step.score if last_step else 0)
 
         lines = []
         lines.append("### 📊 Сводка забега (Матч-репорт)")
         lines.append(f"- **Колода / Стейк**: `{self.deck_name}` | `{self.stake}`")
         lines.append(f"- **Достигнутый рубеж**: Ante **{final_ante}** / Round **{final_round}** ({last_step.blind_name if last_step else 'Unknown'})")
-        lines.append(f"- **Финальный счёт в последнем раунде**: **{last_step.score:,} / {last_step.target_score:,}** фишек (оставалось рук: {last_step.hands_left if last_step else 0}, сбросов: {last_step.discards_left if last_step else 0})")
+        lines.append(f"- **Финальный счёт в последнем раунде**: **{final_score:,} / {last_step.target_score:,}** фишек (оставалось рук: {last_step.hands_left if last_step else 0}, сбросов: {last_step.discards_left if last_step else 0})")
         lines.append(f"- **Экономика**: Пиковый банк **${self.peak_bank}** | Финальный банк: **${final_bank}** | Заработано **+${self.total_earned}** | Потрачено **-${self.total_spent}**")
         lines.append(
             f"- **Статистика действий**: Всего шагов **{len(self.steps)}** | Рук сыграно **{self.total_hands_played}** | "
