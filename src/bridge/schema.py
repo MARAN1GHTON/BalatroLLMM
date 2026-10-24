@@ -281,6 +281,14 @@ class DeckSummaryModel(BaseModel):
     special_cards: list[SpecialDeckCard] = Field(default_factory=list, description="Specific modified cards in draw pile")
     cards: list[CardModel] = Field(default_factory=list, description="All cards currently in draw pile")
 
+    @field_validator("suits", "ranks", "enhancements", mode="before")
+    @classmethod
+    def coerce_lua_empty_table(cls, v: Any) -> Any:
+        """Lua serializes empty tables as JSON arrays ([]) instead of objects ({}); coerce to empty dict."""
+        if isinstance(v, list) and not v:
+            return {}
+        return v
+
 
 class GameState(BaseModel):
     """Comprehensive typed snapshot of the Balatro game state."""
