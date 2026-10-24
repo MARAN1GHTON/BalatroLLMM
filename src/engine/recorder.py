@@ -97,6 +97,16 @@ class StepLog:
     calculation_turns: int = 0
 
 
+def clean_model_folder_name(model: str) -> str:
+    """Sanitizes model name to be safe for directory names on all operating systems."""
+    if not model or model == "unknown":
+        return "unknown"
+    m = model.strip()
+    for ch in ['/', '\\', ':', '*', '?', '"', '<', '>', '|']:
+        m = m.replace(ch, '__' if ch in ['/', '\\'] else '_')
+    return m
+
+
 class BalatroRunRecorder:
     """Tracks game progression and exports detailed analysis reports."""
 
@@ -569,8 +579,9 @@ class BalatroRunRecorder:
         final_round = last_step.round if last_step else 1
         final_bank = last_step.bank if last_step else 0
 
+        date_str = self.start_time.strftime("%d.%m.%Y")
         md = []
-        md.append(f"# {status_emoji} Balatro Autonomous AI Run Report: {status_text}")
+        md.append(f"# {status_emoji} {self.model} / {date_str}")
         md.append(f"**Run ID:** `{self.run_id}` | **Date:** {self.start_time.strftime('%Y-%m-%d %H:%M:%S')} | **Duration:** {mins}m {secs}s\n")
         
         md.append("## 🤖 AI Player Profile")
@@ -909,14 +920,22 @@ class BalatroRunRecorder:
             return None, None
         self.saved = True
 
-        prefix = "victory_run" if victory else "run"
+        prefix = "victory_" if victory else ""
         last_step = self.steps[-1] if self.steps else None
         final_bank = last_step.bank if last_step else 0
-        md_filename = f"{prefix}_{self.run_id}_ante{self.steps[-1].ante if self.steps else 1}.md"
-        json_filename = f"{prefix}_{self.run_id}.json"
+        final_ante = self.steps[-1].ante if self.steps else 1
 
-        md_path = self.output_dir / md_filename
-        json_path = self.output_dir / json_filename
+        date_str = self.start_time.strftime("%d.%m.%Y")
+        time_str = self.start_time.strftime("%H-%M-%S")
+        md_filename = f"{prefix}{date_str}_{time_str}_ante{final_ante}.md"
+        json_filename = f"{prefix}{date_str}_{time_str}.json"
+
+        c_model = clean_model_folder_name(self.model)
+        model_dir = self.output_dir / c_model
+        model_dir.mkdir(parents=True, exist_ok=True)
+
+        md_path = model_dir / md_filename
+        json_path = model_dir / json_filename
 
         # Write Markdown
         md_content = self.generate_markdown_report(victory=victory)
@@ -925,6 +944,7 @@ class BalatroRunRecorder:
         # Write JSON
         json_data = {
             "run_id": self.run_id,
+            "json_file": f"{c_model}/{json_filename}",
             "start_time": self.start_time.isoformat(),
             "end_time": datetime.now().isoformat(),
             "victory": victory,

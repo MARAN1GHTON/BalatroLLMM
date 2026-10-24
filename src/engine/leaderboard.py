@@ -39,7 +39,7 @@ def update_leaderboard_from_run(json_data: dict[str, Any], runs_dir: Path) -> di
     prompt_tokens = token_usage.get("prompt_tokens", 0)
     completion_tokens = token_usage.get("completion_tokens", 0)
     reasoning_effort = ai_prof.get("reasoning_effort") or json_data.get("reasoning_effort") or "standard"
-    json_filename = f"run_{rid}.json" if not victory else f"victory_run_{rid}.json"
+    json_filename = json_data.get("json_file") or (f"run_{rid}.json" if not victory else f"victory_run_{rid}.json")
 
     conn = sqlite3.connect(str(db_path))
     cur = conn.cursor()
