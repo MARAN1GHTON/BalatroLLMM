@@ -28,6 +28,9 @@ Your objective is to beat Ante 8 (and continue into Endless mode) by making inde
      * In Ante 3+, Boss Blinds scale exponentially (`4,000 -> 10,000 -> 20,000 -> 35,000 -> 60,000 -> 100,000+`). Pure flat builds plateau around ~3,000-5,000/hand; you MUST transition into multiplicative `xMult` Jokers, card retriggers, or Glass/Steel multipliers.
    - ACTIVE ROSTER ROTATION:
      * When at 5/5 Joker capacity, sell obsolete early-game Common or pure Utility/Econ Jokers (`sell_joker`) to make room for stronger scaling, `+Chips`, or `xMult` Jokers in the shop.
+   - SCALING XMULT WITH RESET TRIGGERS (`OBELISK`):
+     * `Obelisk` gives `+X0.2 Mult` per consecutive hand without playing your most-played poker hand. **RESET TRIGGER**: Playing your most-played hand (or any hand that ties for #1) **instantly resets Obelisk to X1.0** before scoring!
+     * To scale Obelisk safely, create a runaway decoy hand early (e.g. spam High Card or Pair 15+ times), then exclusively play other hand types without ever tying or exceeding the decoy count. Always check `🏆 Current Most-Played Hand` and `Played: Nx` in the HUD!
 
 3. ECONOMICS & CAPITAL DISCIPLINE:
    - Interest Mechanics: Every `$5` held in bank at the end of a round earns `+$1` interest, capped at `+$5/round` at `$25` bank (`$50` with Seed Money, `$100` with Money Tree).
@@ -36,6 +39,10 @@ Your objective is to beat Ante 8 (and continue into Endless mode) by making inde
      * If your current scoring engine cannot beat the upcoming blind, spend what is needed on direct combat upgrades (`Jokers` or `Buffoon Packs`) to survive.
      * NEVER drain your bank below interest thresholds (`$25 / $20 / $15 / $10`) on non-combat items (`Blank` voucher, `Seed Money` when bank < `$25`, or random `Celestial / Standard Packs` when you lack core Jokers).
      * When your bank is above the `$25` interest cap, spend your surplus cash above `$25` on packs, vouchers, or rerolls without losing any interest.
+   - BLIND SKIPPING & SHOP SACRIFICE:
+     * Skipping a blind costs you the round cash (`+$3-$4`), bonus hands-left cash, round interest, AND an entire Shop visit.
+     * **CRITICAL**: Skipping the **Big Blind** advances you DIRECTLY into the **Boss Blind** with NO shop in between!
+     * Skip tags that offer rewards 'in the next shop' (e.g., Free Rerolls, Foil/Holo/Poly Joker, Coupon Tag, Speed Tag, Investment Tag) **only activate AFTER defeating the Boss Blind**! Never skip the Big Blind expecting an immediate shop upgrade before fighting the Boss! Only skip if your scoring output already beats the Boss Blind with 100% certainty.
 
 4. SHOP, BOOSTERS, VOUCHERS & CONSUMABLES:
    - Active descriptions and exact numeric projections for every offered Joker, Planet, Booster Pack, Voucher, and Boss Blind are dynamically injected into your live state HUD.

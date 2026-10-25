@@ -970,8 +970,36 @@ class BalatroScoringEngine:
                 if len(suits_scored.intersection({"Spades", "Hearts", "Clubs", "Diamonds"})) == 4:
                     total_mult *= 3.0
                     breakdown.append("FlowerPot: X3")
-            elif j.effect_type == "x_mult" and k not in phase12_xmult_keys and not any(
-                w in lbl for w in ("photograph", "ancient", "triboulet", "bloodstone", "idol", "baron", "the duo", "the trio", "the family", "the order", "the tribe")
+            elif "obelisk" in lbl or k == "j_obelisk":
+                val = getattr(j, "x_mult", 1.0)
+                if val <= 1.0:
+                    m = re.search(r'[Xx]([\d\.]+)\s*[Mm]ult', desc)
+                    if m:
+                        val = float(m.group(1))
+                val = max(1.0, val)
+
+                is_reset = False
+                has_history = False
+                if state and state.poker_hands:
+                    target_name = (hand_type or "").strip().lower()
+                    current_counts = {h.name.strip().lower(): (getattr(h, "played", 0) or 0) for h in state.poker_hands if h.name}
+                    has_history = any(c > 0 for c in current_counts.values())
+                    if has_history:
+                        simulated_played = current_counts.get(target_name, 0) + 1
+                        other_counts = [count for name, count in current_counts.items() if name != target_name]
+                        max_other = max(other_counts) if other_counts else 0
+                        if simulated_played >= max_other:
+                            is_reset = True
+
+                if is_reset:
+                    total_mult *= 1.0
+                    breakdown.append("Obelisk(RESET): X1")
+                else:
+                    obelisk_mult = round((val + 0.2) if has_history else val, 2)
+                    total_mult *= obelisk_mult
+                    breakdown.append(f"Obelisk: X{obelisk_mult:g}")
+            elif j.effect_type == "x_mult" and k not in phase12_xmult_keys and k != "j_obelisk" and not any(
+                w in lbl for w in ("photograph", "ancient", "triboulet", "bloodstone", "idol", "baron", "the duo", "the trio", "the family", "the order", "the tribe", "obelisk")
             ):
                 val = getattr(j, "x_mult", 1.0)
                 if val > 1.0:

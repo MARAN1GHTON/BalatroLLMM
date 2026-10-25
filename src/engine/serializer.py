@@ -91,7 +91,7 @@ KNOWN_JOKER_CLEAN_DESCS: dict[str, str] = {
     # Scaling xMult Jokers (Crucial: warn about base X1.0 unscaled!)
     "j_constellation": "Gains X0.1 Mult per Planet card used (⚠️ Starts at base X1.0 Mult; gives NO boost until Planet cards are used!)",
     "j_hologram": "Gains X0.25 Mult per playing card added to deck (⚠️ Starts at base X1.0 Mult; gives NO boost until cards are added!)",
-    "j_obelisk": "Gains X0.2 Mult per consecutive hand played without playing your most played hand (⚠️ Starts at base X1.0 Mult)",
+    "j_obelisk": "Gains X0.2 Mult per consecutive hand played without playing your most played hand (⚠️ Resets to X1.0 if most played hand is played or tied!)",
     "j_vampire": "Gains X0.1 Mult per scoring Enhanced card played, removes card enhancement (⚠️ Starts at base X1.0 Mult)",
     "j_madness": "Gains X0.5 Mult when Small or Big Blind is selected, destroys a random non-Eternal Joker (⚠️ Starts at base X1.0 Mult; on White/Red/Green/Blue Stake where Eternal Jokers do not exist, it WILL cannibalize 1 of your Jokers every Small and Big Blind unless skipped!)",
     "j_campfire": "Gains X0.25 Mult for each card sold, resets when Boss Blind is defeated (⚠️ Starts at base X1.0 Mult)",
@@ -1903,17 +1903,65 @@ def serialize_game_state_to_markdown(
         elif ds.enhancements:
             lines.append(f"  - ✨ *Special*: {', '.join(f'{k}x{v}' for k, v in ds.enhancements.items())}")
 
-    # Poker Hand Levels & Planetary Upgrades
+    # Poker Hand Levels, Played Counts & Most-Played Hand Stats
     if state.poker_hands:
-        upgraded = [h for h in state.poker_hands if h.level > 1]
-        lines.append("\n#### 📊 Poker Hand Levels (Planetary Upgrades):")
-        if upgraded:
-            for h in upgraded:
-                lines.append(f"- 🪐 **{h.name}**: **Lvl {h.level}** ({h.chips} chips x {h.mult} mult = ~{h.chips * h.mult:,} base) | Played: {h.played}x")
+        lines.append("\n#### 📊 Poker Hand Levels & Play Counts:")
+        max_played = max((getattr(h, "played", 0) or 0 for h in state.poker_hands), default=0)
+        most_played = [h.name for h in state.poker_hands if (getattr(h, "played", 0) or 0) == max_played and max_played > 0]
+
+        for h in state.poker_hands:
+            lvl_str = f"**Lvl {h.level}**" if h.level > 1 else f"Lvl {h.level}"
+            base_score = f"~{h.chips * h.mult:,} base"
+            played_count = getattr(h, "played", 0) or 0
+            played_str = f"**Played: {played_count}x**"
+            is_mp = " 🏆 [MOST PLAYED]" if (h.name in most_played and max_played > 0) else ""
+            lines.append(f"- 🪐 **{h.name}**: {lvl_str} ({h.chips} chips x {h.mult} mult = {base_score}) | {played_str}{is_mp}")
+
+        if most_played:
+            lines.append(f"\n🏆 **Current Most-Played Hand**: **{', '.join(most_played)}** ({max_played}x played)")
         else:
-            # Display prominent standard hands
-            common = [h for h in state.poker_hands if h.name in ("Flush", "Full House", "Straight", "Two Pair", "Pair")][:4]
-            lines.append("- Base Hands: " + " | ".join(f"{h.name} Lvl {h.level} ({h.chips}x{h.mult})" for h in common))
+            lines.append("\n🏆 **Current Most-Played Hand**: _None yet (0 hands played)_")
+
+        # Contextual warnings for Obelisk, The Ox, and Card Sharp
+        has_obelisk = any((getattr(j, "key", "") or "").lower() == "j_obelisk" or "obelisk" in (getattr(j, "label", "") or "").lower() for j in state.jokers)
+        if has_obelisk:
+            if most_played:
+                lines.append(
+                    f"> ⚠️ **OBELISK WARNING**: Playing or tying your most-played hand ({', '.join(most_played)} @ {max_played}x) "
+                    f"will RESET Obelisk back to X1.0! Play any OTHER poker hand to safely gain +X0.2 Mult."
+                )
+            else:
+                lines.append(
+                    "> ⚠️ **OBELISK ACTIVE**: Gains +X0.2 Mult per consecutive hand played without playing your most-played hand. "
+                    "Establish a high decoy count on one throwaway hand, then switch permanently to other hands."
+                )
+
+        is_ox = False
+        if state.blind and ("ox" in (getattr(state.blind, "name", "") or "").lower() or "вол" in (getattr(state.blind, "name", "") or "").lower()):
+            is_ox = True
+        elif state.ante_blinds:
+            for b in state.ante_blinds:
+                if getattr(b, "type", "") == "Boss" and ("ox" in (getattr(b, "name", "") or "").lower() or "вол" in (getattr(b, "name", "") or "").lower()):
+                    is_ox = True
+                    break
+        if is_ox and most_played:
+            lines.append(
+                f"> 🚨 **THE OX ALERT**: The Ox Boss sets bank to $0 if you play your most-played hand ({', '.join(most_played)})! "
+                f"Prepare an alternate hand type to protect your cash, or spend down your bank before the boss."
+            )
+
+        has_card_sharp = any((getattr(j, "key", "") or "").lower() == "j_card_sharp" or "card sharp" in (getattr(j, "label", "") or "").lower() for j in state.jokers)
+        if has_card_sharp:
+            played_round = getattr(state, "played_hand_types_this_round", []) or []
+            if played_round:
+                lines.append(
+                    f"> 🃏 **CARD SHARP ACTIVE**: X3 Mult triggers ONLY on repeated hands! Hands played this round: **{', '.join(played_round)}**. "
+                    f"Playing one of these hand types gives X3 Mult!"
+                )
+            else:
+                lines.append(
+                    "> 🃏 **CARD SHARP ACTIVE**: X3 Mult triggers ONLY on hand types already played this round! First hand of the round will NOT receive X3 Mult."
+                )
 
     # Full Ante Blinds Roadmap & Skip Tags
     if state.ante_blinds:
@@ -1941,6 +1989,15 @@ def serialize_game_state_to_markdown(
         lines.append("- Actions: Call `select_blind()` to play the round, or `skip_blind()` to skip and claim the Tag reward.")
         if state.blind.skip_tag_name:
             lines.append(f"- **Current Offered Skip Tag**: 🎁 **{state.blind.skip_tag_name}** — {state.blind.skip_tag_desc}")
+            b_type = (getattr(state.blind, "type", "") or "").capitalize()
+            b_name = (getattr(state.blind, "name", "") or "").lower()
+            if b_type == "Big" or "big" in b_name or "больш" in b_name:
+                lines.append(
+                    "> ⚠️ **CRITICAL BIG BLIND SKIP WARNING**: Skipping Big Blind immediately jumps you into the **BOSS BLIND**! "
+                    "There is NO shop between Big Blind and Boss Blind! Any skip tag that gives rewards 'in the next shop' "
+                    "(e.g., Free Rerolls, Polychrome/Holographic Joker, Foil Joker, Coupon Tag, Speed Tag, Investment Tag) "
+                    "will ONLY activate AFTER you beat the Boss! Skipping also forfeits round cash ($4+), hands-left bonus, and shop scaling!"
+                )
         elif state.blind.is_boss:
             lines.append("- **Skip Tag**: _Boss Blind cannot be skipped._")
         if state.can_reroll_boss:
@@ -1995,6 +2052,8 @@ def serialize_game_state_to_markdown(
                 lines.append("> ℹ️ **DROLL JOKER NOTE**: Requires FLUSH (5 cards of same suit) for +10 Mult. Does NOT trigger on Pairs!")
             elif "jolly" in j_name or "j_jolly" in j_name:
                 lines.append("> ℹ️ **JOLLY JOKER NOTE**: Requires PAIR for +8 Mult.")
+            elif "obelisk" in j_name or "j_obelisk" in j_name:
+                lines.append(f"> 🗼 **OBELISK STATUS**: Currently scaled to X{getattr(j, 'x_mult', 1.0):g} Mult (+X0.2 per non-most-played hand). Playing or tying your most-played hand resets to X1.0!")
 
     # Check for Luchador in Jokers
     has_luchador = any("luchador" in getattr(j, "name", "").lower() or "luchador" in getattr(j, "key", "").lower() for j in state.jokers)
