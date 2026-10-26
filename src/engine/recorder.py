@@ -581,7 +581,12 @@ class BalatroRunRecorder:
             status_text = "VICTORY: Ante 8 Boss Defeated!"
         else:
             # An honest in-game defeat (out of hands on a blind), not a system crash.
-            final_score = last_step.score if last_step else 0
+            # A play_cards step's `score` is the score BEFORE that hand resolved,
+            # so the last hand's score_delta must be added to get the true final score.
+            if last_step and last_step.action_name == "play_cards" and last_step.score_delta > 0:
+                final_score = last_step.score + last_step.score_delta
+            else:
+                final_score = last_step.score if last_step else 0
             final_target = last_step.target_score if last_step else 0
             if final_target > 0:
                 status_text = f"DEFEAT: Ran out of hands in Ante {final_ante} (final score {final_score:,}/{final_target:,})"
