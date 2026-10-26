@@ -283,6 +283,59 @@ class TestEngineerImprovements(unittest.TestCase):
         self.assertEqual(res.score, 32 * 9)
         self.assertTrue(any("Poly" in b for b in res.breakdown))
 
+    def test_scoring_the_arm_downgrades_level_before_scoring(self):
+        """The Arm decreases the level of the played poker hand by 1 BEFORE scoring
+        (min level 1). Regression test from run 26.10.2026: simulate_hand projected
+        10,336 for a Straight while the game scored 9,576."""
+        from src.engine.scoring import BalatroScoringEngine
+        from src.bridge.schema import PokerHandModel
+
+        engine = BalatroScoringEngine()
+        cards = [
+            CardModel(id="c1", rank="King", suit="Spades"),
+            CardModel(id="c2", rank="King", suit="Hearts"),
+        ]
+        # Pair leveled to 4 via Jupiter: base 10+15*3=55 chips, 2+1*3=5 mult
+        leveled_pair = PokerHandModel(name="Pair", level=4, chips=55, mult=5, played=6)
+        poker_hands = [leveled_pair]
+
+        # Normal blind: leveled Pair counts at full level (55 x 5 base).
+        state_normal = GameState(
+            jokers=[],
+            poker_hands=poker_hands,
+            blind=BlindModel(name="Small Blind", chips_needed=300),
+        )
+        res_normal = engine.calculate_expected_hand_score(cards, hand_type="Pair", state=state_normal)
+
+        # The Arm: level drops by 1 before scoring -> 55-15=40 chips, 5-1=4 mult base.
+        state_arm = GameState(
+            jokers=[],
+            poker_hands=poker_hands,
+            blind=BlindModel(name="The Arm", chips_needed=40000, is_boss=True),
+        )
+        res_arm = engine.calculate_expected_hand_score(cards, hand_type="Pair", state=state_arm)
+
+        # Card chips are unaffected: K+K = 20. So chips drop by exactly 15,
+        # and mult drops by exactly 1 (level step for Pair).
+        self.assertEqual(res_normal.chips - res_arm.chips, 15)
+        self.assertEqual(res_normal.mult - res_arm.mult, 1)
+        self.assertTrue(any("TheArm" in b for b in res_arm.breakdown))
+        self.assertFalse(any("TheArm" in b for b in res_normal.breakdown))
+
+        # Level-1 hand must not be downgraded below level 1.
+        pair_lvl1 = PokerHandModel(name="Pair", level=1, chips=10, mult=2, played=0)
+        state_lvl1 = GameState(
+            jokers=[],
+            poker_hands=[pair_lvl1],
+            blind=BlindModel(name="The Arm", chips_needed=40000, is_boss=True),
+        )
+        res_lvl1 = engine.calculate_expected_hand_score(cards, hand_type="Pair", state=state_lvl1)
+        self.assertEqual(res_lvl1.chips, res_lvl1.chips)  # no crash
+        self.assertTrue(any("level 1" in b for b in res_lvl1.breakdown))
+        # Base must remain at level-1 stats: 10 chips + 20 card chips = 30.
+        self.assertEqual(res_lvl1.chips, 30)
+        self.assertEqual(res_lvl1.mult, 2)
+
     def test_utility_econ_and_hybrid_joker_roles(self):
         from src.engine.serializer import get_joker_role, format_joker_compact
 

@@ -18,7 +18,7 @@ from typing import Any, Sequence
 
 from ..bridge.schema import CardModel, GameState, JokerModel, PokerHandModel, ShopItemModel
 from ..bridge.client import normalize_id_list
-from .scoring import BalatroScoringEngine, POKER_HAND_BASE
+from .scoring import BalatroScoringEngine, POKER_HAND_BASE, PLANET_HAND_UPGRADES
 from .vouchers import find_voucher_data, format_voucher_impact
 
 # Map planet names to poker hand types
@@ -37,21 +37,8 @@ PLANET_TO_HAND = {
     "eris": "Flush Five",
 }
 
-# Standard Balatro hand level upgrades: (Chips per level, Mult per level)
-PLANET_HAND_UPGRADES = {
-    "High Card": (10, 1),
-    "Pair": (15, 1),
-    "Two Pair": (20, 1),
-    "Three of a Kind": (30, 2),
-    "Straight": (30, 3),
-    "Flush": (15, 2),
-    "Full House": (25, 2),
-    "Four of a Kind": (30, 3),
-    "Straight Flush": (40, 4),
-    "Five of a Kind": (35, 3),
-    "Flush House": (40, 4),
-    "Flush Five": (50, 3),
-}
+# NOTE: PLANET_HAND_UPGRADES now lives in scoring.py (imported above) so that
+# The Arm's pre-scoring level downgrade uses the exact same upgrade steps.
 
 
 def resolve_card_ids(raw_ids: Any, hand: Sequence[CardModel] | None) -> list[str]:

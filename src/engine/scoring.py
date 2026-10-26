@@ -4,8 +4,25 @@ from collections import Counter
 from itertools import combinations
 import math
 import re
-from typing import Sequence, NamedTuple
+from typing import Any, Sequence, NamedTuple
 from ..bridge.schema import CardModel, GameState, JokerModel
+
+# Standard Balatro hand level upgrades: (Chips per level, Mult per level).
+# Shared with calculator.py; duplicated here to avoid a circular import.
+PLANET_HAND_UPGRADES = {
+    "High Card": (10, 1),
+    "Pair": (15, 1),
+    "Two Pair": (20, 1),
+    "Three of a Kind": (30, 2),
+    "Straight": (30, 3),
+    "Flush": (15, 2),
+    "Full House": (25, 2),
+    "Four of a Kind": (30, 3),
+    "Straight Flush": (40, 4),
+    "Five of a Kind": (35, 3),
+    "Flush House": (40, 4),
+    "Flush Five": (50, 3),
+}
 
 # Standard Balatro base poker hands: (Base Chips, Base Mult)
 POKER_HAND_BASE = {
@@ -459,7 +476,23 @@ class BalatroScoringEngine:
                     hand_played = ph.played
                     break
 
+        # The Arm: decrease the level of the played poker hand by 1 BEFORE scoring (min level 1).
+        # Reverse one Planet upgrade step so projections match the actual in-game result.
+        if is_boss_blind and not is_disabled and ("arm" in boss_name or "рука" in boss_name):
+            base_c, base_m = POKER_HAND_BASE.get(hand_type, (base_chips, base_mult))
+            up_c, up_m = PLANET_HAND_UPGRADES.get(hand_type, (15, 1))
+            if base_chips > base_c or base_mult > base_m:
+                base_chips = max(base_c, base_chips - up_c)
+                base_mult = max(base_m, base_mult - up_m)
+                breakdown_preview = f"TheArm: {hand_type} level -1 before scoring (base now {base_chips}x{base_mult})"
+            else:
+                breakdown_preview = "TheArm: hand already at level 1 (no downgrade possible)"
+        else:
+            breakdown_preview = None
+
         breakdown: list[str] = [f"Base {base_chips}x{base_mult}"]
+        if breakdown_preview:
+            breakdown.append(breakdown_preview)
 
         # Boss Blind debuff check on Base Chips/Mult
         if not is_disabled and ("flint" in boss_name or "кремень" in boss_name):

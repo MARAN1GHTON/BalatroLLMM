@@ -3,7 +3,7 @@
 import collections
 import math
 import re
-from ..bridge.schema import GameState, CardModel, JokerModel, PokerHandModel, ShopItemModel
+from ..bridge.schema import GameState, CardModel, JokerModel, PokerHandModel, ShopItemModel, BlindModel
 from .scoring import BalatroScoringEngine, POKER_HAND_BASE
 from .vouchers import find_voucher_data, format_voucher_impact, format_owned_voucher_line
 from .lorebook import get_lorebook_insights_for_state

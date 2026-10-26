@@ -573,11 +573,20 @@ class BalatroRunRecorder:
         mins, secs = divmod(duration_sec, 60)
 
         status_emoji = "🏆" if victory else "💀"
-        status_text = "VICTORY: Ante 8 Boss Defeated!" if victory else "RUN TERMINATED"
         last_step = self.steps[-1] if self.steps else None
         final_ante = last_step.ante if last_step else 1
         final_round = last_step.round if last_step else 1
         final_bank = last_step.bank if last_step else 0
+        if victory:
+            status_text = "VICTORY: Ante 8 Boss Defeated!"
+        else:
+            # An honest in-game defeat (out of hands on a blind), not a system crash.
+            final_score = last_step.score if last_step else 0
+            final_target = last_step.target_score if last_step else 0
+            if final_target > 0:
+                status_text = f"DEFEAT: Ran out of hands in Ante {final_ante} (final score {final_score:,}/{final_target:,})"
+            else:
+                status_text = "DEFEAT: Run ended in Ante {ante}".format(ante=final_ante)
 
         date_str = self.start_time.strftime("%d.%m.%Y")
         md = []

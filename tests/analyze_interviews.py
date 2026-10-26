@@ -7,7 +7,9 @@ from collections import Counter
 sys.stdout.reconfigure(encoding="utf-8")
 
 runs_dir = Path(__file__).resolve().parent.parent / "runs"
-files = sorted(runs_dir.glob("run_*.md"), key=os.path.getmtime, reverse=True)
+# Reports live in per-model subdirectories: runs/<model>/<date>_<time>_ante<N>.md
+# (optionally prefixed with "victory_"). Recurse so the analyzer actually finds them.
+files = sorted(runs_dir.glob("*/*.md"), key=os.path.getmtime, reverse=True)
 
 reports_data = []
 
