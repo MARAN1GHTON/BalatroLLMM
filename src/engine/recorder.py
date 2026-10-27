@@ -180,6 +180,21 @@ class BalatroRunRecorder:
         cards_summary = ", ".join(combo.cards_played[:5]) if combo.cards_played else ""
         return f"{h_name}: [{cards_summary}]"
 
+    def get_best_hand_joker_labels(self) -> list[str] | None:
+        """Returns the Joker labels that were active when the run's peak hand was scored.
+
+        The recorder formats each joker as 'Label (rarity, role): desc', so the label
+        is the segment before the first ' ('.
+        """
+        if not self.best_combo or not self.best_combo.active_jokers:
+            return None
+        labels = []
+        for entry in self.best_combo.active_jokers:
+            label = entry.split(" (", 1)[0].strip()
+            if label:
+                labels.append(label)
+        return labels or None
+
     def save_active_checkpoint(self) -> None:
         """Saves active unfinalized run state to disk so it survives crashes/restarts."""
         if not self.steps:

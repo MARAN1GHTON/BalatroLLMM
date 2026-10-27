@@ -336,6 +336,50 @@ class TestEngineerImprovements(unittest.TestCase):
         self.assertEqual(res_lvl1.chips, 30)
         self.assertEqual(res_lvl1.mult, 2)
 
+    def test_peak_hand_provenance_warning(self):
+        """The 'Run Peak Hand' benchmark must flag when the peak was set with Jokers
+        that are no longer in the build (run 27.10: model sold Blackboard X3 but kept
+        planning around the 22,464 peak it had set WITH Blackboard)."""
+        from src.engine.serializer import serialize_game_state_to_markdown
+
+        blackboard = JokerModel(id="j_bb", key="j_blackboard", label="Blackboard", effect_desc="X3 Mult if all cards held in hand are Spades or Clubs")
+        trousers = JokerModel(id="j_st", key="j_spare_trousers", label="Spare Trousers", effect_desc="+2 Mult if hand contains a Two Pair")
+        banner = JokerModel(id="j_bn", key="j_banner", label="Banner", effect_desc="+30 Chips for each remaining discard")
+
+        state_after_sale = GameState(
+            stage="BLIND_SELECT",
+            ante=7,
+            jokers=[trousers, banner],  # Blackboard sold
+            blind=BlindModel(name="The Window", chips_needed=40000, is_boss=True),
+        )
+        md = serialize_game_state_to_markdown(
+            state_after_sale,
+            max_hand_score=22464,
+            best_hand_desc="Two Pair: [A♥, A♦, Q♠, Q♦, 5♥]",
+            best_hand_jokers=["Blackboard", "Spare Trousers", "Even Steven"],
+        )
+        self.assertIn("PEAK PROVENANCE", md)
+        self.assertIn("Blackboard", md)
+        self.assertIn("Even Steven", md)
+        # The peak must still be shown (honest history), not hidden.
+        self.assertIn("22,464", md)
+
+        # Same build as peak -> no provenance warning.
+        state_same_build = GameState(
+            stage="BLIND_SELECT",
+            ante=7,
+            jokers=[blackboard, trousers],
+            blind=BlindModel(name="The Window", chips_needed=40000, is_boss=True),
+        )
+        md2 = serialize_game_state_to_markdown(
+            state_same_build,
+            max_hand_score=22464,
+            best_hand_desc="Two Pair: [A♥, A♦, Q♠, Q♦, 5♥]",
+            best_hand_jokers=["Blackboard", "Spare Trousers"],
+        )
+        self.assertNotIn("PEAK PROVENANCE", md2)
+        self.assertIn("22,464", md2)
+
     def test_utility_econ_and_hybrid_joker_roles(self):
         from src.engine.serializer import get_joker_role, format_joker_compact
 

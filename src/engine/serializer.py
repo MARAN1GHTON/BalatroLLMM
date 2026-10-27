@@ -1679,6 +1679,7 @@ def serialize_game_state_to_markdown(
     loyalty_remaining: int | None = None,
     max_hand_score: int = 0,
     best_hand_desc: str | None = None,
+    best_hand_jokers: list[str] | None = None,
 ) -> str:
     """Transforms raw GameState into a token-efficient, context-rich Markdown document."""
     lines: list[str] = []
@@ -1801,6 +1802,20 @@ def serialize_game_state_to_markdown(
             f"Ante {state.ante} Boss ({boss_name or 'Boss'}): **{boss_chips:,} chips** "
             f"(Peak covers **{cov_pct:.1f}%** of Boss)"
         )
+        # Provenance audit: the peak is a HISTORICAL record. If the Jokers that
+        # produced it are no longer all active, the number may overstate what the
+        # CURRENT build can do — flag that instead of letting it read as "my hand hits X".
+        current_joker_labels = {(j.label or "").strip() for j in state.jokers}
+        missing_peak_jokers = sorted(
+            {lbl for lbl in (best_hand_jokers or []) if lbl and lbl not in current_joker_labels}
+        )
+        if missing_peak_jokers:
+            missing_str = ", ".join(missing_peak_jokers)
+            lines.append(
+                f"> ⚠️ **PEAK PROVENANCE**: The {max_hand_score:,} peak was set with **{missing_str}** in the build — "
+                f"no longer active. Your CURRENT jokers may score differently; re-run `simulate_hand` "
+                f"on your actual hand before relying on the peak figure."
+            )
         if gap > 0:
             if max_hand_score * 4 < boss_chips:
                 lines.append(
@@ -1817,8 +1832,19 @@ def serialize_game_state_to_markdown(
     elif max_hand_score > 0 and state.stage == "SELECTING_HAND" and state.blind.is_boss:
         cov_pct = (max_hand_score / boss_chips) * 100
         desc_str = f" ({best_hand_desc})" if best_hand_desc else ""
+        current_joker_labels = {(j.label or "").strip() for j in state.jokers}
+        missing_peak_jokers = sorted(
+            {lbl for lbl in (best_hand_jokers or []) if lbl and lbl not in current_joker_labels}
+        )
+        provenance_note = ""
+        if missing_peak_jokers:
+            missing_str = ", ".join(missing_peak_jokers)
+            provenance_note = (
+                f"\n> ⚠️ **PEAK PROVENANCE**: Peak set with **{missing_str}** (no longer active) — "
+                f"current build may score differently; re-run `simulate_hand` before relying on the peak."
+            )
         lines.append(
-            f"- **Boss Benchmark**: Run Peak Hand: **{max_hand_score:,} chips**{desc_str} vs Boss Target: **{boss_chips:,} chips** ({cov_pct:.1f}% coverage)"
+            f"- **Boss Benchmark**: Run Peak Hand: **{max_hand_score:,} chips**{desc_str} vs Boss Target: **{boss_chips:,} chips** ({cov_pct:.1f}% coverage){provenance_note}"
         )
 
     # 1c. Macro-Strategic Scratchpad (placed AFTER objective facts & Reality Check to prevent self-anchoring bias)

@@ -1524,6 +1524,7 @@ class BalatroAgentRunner:
                         loyalty_remaining=loyalty_remaining,
                         max_hand_score=self.recorder.max_single_hand_score,
                         best_hand_desc=self.recorder.get_best_hand_desc(),
+                        best_hand_jokers=self.recorder.get_best_hand_joker_labels(),
                     )
 
                     # 5. Display state summary and live indicators in console
