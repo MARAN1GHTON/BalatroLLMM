@@ -336,6 +336,70 @@ class TestEngineerImprovements(unittest.TestCase):
         self.assertEqual(res_lvl1.chips, 30)
         self.assertEqual(res_lvl1.mult, 2)
 
+    def test_hiker_only_upgrades_cards_that_actually_score(self):
+        """Hiker grants +5 permanent Chips per SCORING trigger, not to every played card.
+        Regression guard for Pair/High Card padding, persistent card bonuses, and Splash."""
+        from src.engine.scoring import BalatroScoringEngine
+
+        engine = BalatroScoringEngine()
+        hiker = JokerModel(id="j_h", key="j_hiker", label="Hiker", effect_type="chips")
+        splash = JokerModel(id="j_s", key="j_splash", label="Splash", effect_type="utility")
+        state = GameState(
+            stage="SELECTING_HAND",
+            jokers=[hiker],
+            blind=BlindModel(name="Small Blind", chips_needed=300),
+        )
+        pair_with_three_kickers = [
+            CardModel(id="c1", rank="King", suit="Hearts"),
+            CardModel(id="c2", rank="King", suit="Spades"),
+            CardModel(id="c3", rank="2", suit="Clubs"),
+            CardModel(id="c4", rank="3", suit="Diamonds"),
+            CardModel(id="c5", rank="4", suit="Clubs"),
+        ]
+
+        # Pair base 10 + two Kings (10+10) + two Hiker triggers (5+5) = 40.
+        # The 2/3/4 are played but do NOT score and receive no Hiker trigger.
+        pair_result = engine.calculate_expected_hand_score(
+            pair_with_three_kickers, hand_type="Pair", state=state
+        )
+        self.assertEqual(pair_result.chips, 40)
+        self.assertEqual(pair_result.mult, 2)
+        self.assertEqual(pair_result.score, 80)
+
+        # High Card base 5 + Ace 11 + one Hiker trigger 5 = 21, not +5 for all five cards.
+        high_card_with_padding = [
+            CardModel(id="h1", rank="Ace", suit="Hearts"),
+            CardModel(id="h2", rank="King", suit="Spades"),
+            CardModel(id="h3", rank="9", suit="Clubs"),
+            CardModel(id="h4", rank="8", suit="Diamonds"),
+            CardModel(id="h5", rank="7", suit="Clubs"),
+        ]
+        high_result = engine.calculate_expected_hand_score(
+            high_card_with_padding, hand_type="High Card", state=state
+        )
+        self.assertEqual(high_result.chips, 21)
+        self.assertEqual(high_result.score, 21)
+
+        # Splash makes all five played cards scoring cards, so the same Pair gains 5 triggers.
+        state.jokers = [hiker, splash]
+        splash_result = engine.calculate_expected_hand_score(
+            pair_with_three_kickers, hand_type="Pair", state=state
+        )
+        self.assertEqual(splash_result.chips - pair_result.chips, 24)
+        self.assertEqual(splash_result.chips, 64)
+
+        # Permanent Hiker bonuses arrive in CardModel.chip_bonus from Lua and persist in projections.
+        state.jokers = [hiker]
+        upgraded_pair = [
+            CardModel(id="u1", rank="King", suit="Hearts", chip_bonus=20),
+            CardModel(id="u2", rank="King", suit="Spades", chip_bonus=5),
+        ]
+        upgraded_result = engine.calculate_expected_hand_score(
+            upgraded_pair, hand_type="Pair", state=state
+        )
+        # 10 base + 20 existing + 5 existing + 20 rank + 10 new Hiker triggers = 65.
+        self.assertEqual(upgraded_result.chips, 65)
+
     def test_peak_hand_provenance_warning(self):
         """The 'Run Peak Hand' benchmark must flag when the peak was set with Jokers
         that are no longer in the build (run 27.10: model sold Blackboard X3 but kept

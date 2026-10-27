@@ -163,6 +163,9 @@ def test_fish_draw_profile_intel():
     assert "Even Steven (+4 Mult)" in intel_text
     assert "Walkie Talkie (+10c/+4m)" in intel_text
     assert "Hiker (+5 chips permanent)" in intel_text
+    assert "Only cards that actually score" in intel_text
+    assert "ALL played hidden cards trigger" not in intel_text
+    assert "Non-scoring played cards do not trigger Hiker" in intel_text
     assert "TACTICAL DIRECTIVE (AVOID BLIND PANIC)" in intel_text
     assert "Pad Visible Anchors" in intel_text
 

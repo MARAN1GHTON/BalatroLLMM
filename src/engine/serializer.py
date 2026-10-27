@@ -1651,7 +1651,7 @@ def format_draw_profile_intel(state: GameState, face_down_count: int, is_fish: b
             synergies.append(f"Face Card Jokers: {face_cards}/{total_rem} cards are face cards (~{face_pct}%).")
 
     if any("hiker" in (j.label or "").lower() for j in state.jokers if not j.debuffed):
-        synergies.append("Hiker (+5 chips permanent): ALL played hidden cards trigger +5 permanent chips when scored.")
+        synergies.append("Hiker (+5 chips permanent): Only cards that actually score gain +5 permanent chips per scoring trigger; played non-scoring cards and debuffed cards do not. Splash makes every played card score.")
 
     if synergies:
         lines.append("> • **JOKER TRIGGER SYNERGIES**:\n>   - " + "\n>   - ".join(synergies))
@@ -1665,7 +1665,7 @@ def format_draw_profile_intel(state: GameState, face_down_count: int, is_fish: b
     lines.append(
         f"> • **TACTICAL DIRECTIVE (AVOID BLIND PANIC)**:\n"
         f">   1. **Do NOT Play 1-2 Cards In A Rush**: Playing single cards yields minimal score (e.g. 80–270 chips) and forces The Fish to draw even more face-down cards! Always play full 4–5 card hands.\n"
-        f">   2. **Pad Visible Anchors**: Keep your strongest visible combo and pad with face-down cards to reach 5 cards. Hidden cards score their nominal chips, trigger Hiker and passives, and may secretly form Trips or Two Pair!\n"
+        f">   2. **Pad Visible Anchors**: Keep your strongest visible combo and pad with face-down cards to reach 5 cards. Face-down status only hides identity; cards still participate in forming and scoring the hand normally. Non-scoring played cards do not trigger Hiker or other when-scored passives (unless Splash is active).\n"
         f">   3. **Discards**: {discard_note}"
     )
 
