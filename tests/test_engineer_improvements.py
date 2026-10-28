@@ -400,6 +400,37 @@ class TestEngineerImprovements(unittest.TestCase):
         # 10 base + 20 existing + 5 existing + 20 rank + 10 new Hiker triggers = 65.
         self.assertEqual(upgraded_result.chips, 65)
 
+    def test_debuffed_cards_still_form_hands_and_trigger_independent_jokers(self):
+        """The Window does not erase a Flush's base or Crafty Joker's +80 Chips."""
+        from src.engine.scoring import BalatroScoringEngine
+
+        crafty = JokerModel(id="j_crafty", key="j_crafty", label="Crafty Joker", effect_type="chips")
+        diamonds = [
+            CardModel(id="d1", rank="Ace", suit="Diamonds", debuffed=True),
+            CardModel(id="d2", rank="Queen", suit="Diamonds", debuffed=True),
+            CardModel(id="d3", rank="Jack", suit="Diamonds", debuffed=True),
+            CardModel(id="d4", rank="7", suit="Diamonds", debuffed=True),
+            CardModel(id="d5", rank="2", suit="Diamonds", debuffed=True),
+        ]
+        state = GameState(
+            stage="SELECTING_HAND",
+            jokers=[crafty],
+            blind=BlindModel(name="The Window", is_boss=True, chips_needed=600),
+            hand=diamonds,
+        )
+        result = BalatroScoringEngine().calculate_expected_hand_score(diamonds, state=state)
+        self.assertEqual((result.chips, result.mult, result.score), (115, 4, 460))
+
+        md = serialize_game_state_to_markdown(state)
+        self.assertIn("Debuffed cards still form poker hands", md)
+        self.assertIn("Base hand Chips/Mult and independent Joker effects still score", md)
+        self.assertNotIn("Do not rely on them for scoring", md)
+
+        state.blind = BlindModel(name="The Pillar", is_boss=True, chips_needed=70000)
+        pillar_md = serialize_game_state_to_markdown(state)
+        self.assertIn("Debuffed cards still form poker hands", pillar_md)
+        self.assertNotIn("do NOT build hands around them", pillar_md)
+
     def test_peak_hand_provenance_warning(self):
         """The 'Run Peak Hand' benchmark must flag when the peak was set with Jokers
         that are no longer in the build (run 27.10: model sold Blackboard X3 but kept

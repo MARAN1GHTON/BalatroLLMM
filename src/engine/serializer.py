@@ -1328,6 +1328,12 @@ def get_cumulative_stake_modifiers(current_stake_str: str) -> list[str]:
     return active_modifiers
 
 
+DEBUFFED_CARD_RULE = (
+    "Debuffed cards still form poker hands. Base hand Chips/Mult and independent Joker effects "
+    "still score; only the debuffed cards' own chips, enhancements, editions, seals and when-scored triggers are disabled."
+)
+
+
 def get_boss_rule_reminder(boss_name: str | None) -> str | None:
     """Returns accurate, non-hallucinatory rules for Boss Blinds (supports English & Russian names)."""
     if not boss_name:
@@ -1346,7 +1352,7 @@ def get_boss_rule_reminder(boss_name: str | None) -> str | None:
     elif "mouth" in n or "рот" in n:
         return "Can ONLY play 1 hand type this round! All hands played must be the same poker hand."
     elif "plant" in n or "растение" in n:
-        return "All face cards (J, Q, K) are debuffed to 0! Score with Aces and numbered cards (Aces are NOT face cards)."
+        return f"All face cards (J, Q, K) are debuffed. {DEBUFFED_CARD_RULE}"
     elif "mark" in n or "знак" in n:
         return "All face cards (J, Q, K) are drawn face down! NOTE: Face cards STILL score normal chips and mult AND trigger face-card Jokers (Smiley Face, Scary Face, Photograph, Sock and Buskin)! They are simply hidden visually."
     elif "fish" in n or "рыб" in n:
@@ -1355,21 +1361,21 @@ def get_boss_rule_reminder(boss_name: str | None) -> str | None:
             "TACTIC: Keep visible anchor cards, pad hands with face-down cards up to 5 cards to trigger Jokers and passive bonuses, and check your draw pile profile."
         )
     elif "pillar" in n or "столп" in n:
-        return "Cards played previously in this Ante are debuffed (give 0 chips/mult)."
+        return f"Cards played previously in this Ante are debuffed. {DEBUFFED_CARD_RULE}"
     elif "flint" in n or "кремень" in n:
         return "Base chips and mult are halved. Flat Mult and flat Chip Jokers remain full strength."
     elif "leaf" in n or "verdant" in n or "лист" in n:
-        return "All cards are debuffed until 1 Joker is sold with `sell_joker`."
+        return f"All cards are debuffed until 1 Joker is sold with `sell_joker`. {DEBUFFED_CARD_RULE}"
     elif "ox" in n or "вол" in n:
         return "Playing your most-played hand sets bank to $0."
     elif "club" in n or "треф" in n:
-        return "Clubs are debuffed (0 chips/mult)."
+        return f"Clubs are debuffed. {DEBUFFED_CARD_RULE}"
     elif "goad" in n or "пик" in n:
-        return "Spades are debuffed (0 chips/mult)."
+        return f"Spades are debuffed. {DEBUFFED_CARD_RULE}"
     elif "window" in n or "буб" in n:
-        return "Diamonds are debuffed (0 chips/mult)."
+        return f"Diamonds are debuffed. {DEBUFFED_CARD_RULE}"
     elif "head" in n or "черв" in n:
-        return "Hearts are debuffed (0 chips/mult)."
+        return f"Hearts are debuffed. {DEBUFFED_CARD_RULE}"
     elif "arm" in n or "рука" in n:
         return "Decreases level of played poker hand by 1."
     elif "water" in n or "вода" in n:
@@ -1891,7 +1897,7 @@ def serialize_game_state_to_markdown(
                 f"- **Draw Pile Deck**: **{ds.total_remaining} cards ({eff_count} EFFECTIVE / {deb_count} DEBUFFED by {state.blind.name})**: Suits: [{suits_str}] | Faces: {ds.face_cards} | Aces: {ds.aces}"
             )
             lines.append(
-                f"> ⛔ **BOSS DEBUFF ALERT ({state.blind.name})**: {debuff_desc}! Debuffed cards score 0 chips and 0 mult. Do not rely on them for scoring!"
+                f"> ⛔ **BOSS DEBUFF ALERT ({state.blind.name})**: {debuff_desc}! {DEBUFFED_CARD_RULE}"
             )
         elif debuff_cat == "Face":
             deb_count = ds.face_cards
@@ -1901,7 +1907,7 @@ def serialize_game_state_to_markdown(
                 f"- **Draw Pile Deck**: **{ds.total_remaining} cards ({eff_count} EFFECTIVE / {deb_count} DEBUFFED by The Plant)**: Suits: [{suits_str}] | Faces: {ds.face_cards} (⛔ DEBUFFED - 0 chips/mult!) | Aces: {ds.aces}"
             )
             lines.append(
-                f"> ⛔ **BOSS DEBUFF ALERT (The Plant)**: Debuffs ALL Face cards (J, Q, K)! They score 0 chips and 0 mult. Prioritize numbered cards or Aces!"
+                f"> ⛔ **BOSS DEBUFF ALERT (The Plant)**: Debuffs ALL Face cards (J, Q, K)! {DEBUFFED_CARD_RULE}"
             )
         else:
             suits_str = " ".join(f"{suit_syms.get(s, s)}:{c}" for s, c in ds.suits.items())
@@ -2186,7 +2192,8 @@ def serialize_game_state_to_markdown(
                 lines.append(
                     f"> 🏛️ **THE PILLAR AUDIT**: Hand has {len(clean_in_hand)} FRESH card(s) and {len(debuffed_in_hand)} DEBUFFED card(s)!\n"
                     f">   • Fresh/Clean cards: [{clean_str}]\n"
-                    f">   • ⚠️ Debuffed cards (give 0 chips/mult, do NOT build hands around them!): [{deb_str}]"
+                    f">   • ⚠️ Debuffed cards: [{deb_str}]\n"
+                    f">   • {DEBUFFED_CARD_RULE}"
                 )
             elif not state.blind.is_boss and is_pillar_ante:
                 played_in_hand = [c for c in state.hand if getattr(c, "played_this_ante", False)]
