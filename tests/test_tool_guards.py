@@ -8,9 +8,12 @@ AGENT_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(AGENT_DIR))
 
 import unittest
+from unittest.mock import AsyncMock
+
+from src.agent.runner import BalatroAgentRunner
 from src.bridge.client import normalize_id_list
 from src.bridge.schema import GameState
-from src.engine.tools import get_available_tools
+from src.engine.tools import ToolCallAction, get_available_tools
 
 
 class TestToolGuardrails(unittest.TestCase):
@@ -38,6 +41,22 @@ class TestToolGuardrails(unittest.TestCase):
         self.assertEqual(normalize_id_list(None), [])
         self.assertEqual(normalize_id_list(""), [])
         self.assertEqual(normalize_id_list([]), [])
+
+    def test_string_shop_index_is_normalized_before_bridge_and_recording(self) -> None:
+        """Providers may return "1" despite the integer JSON schema."""
+        action = ToolCallAction(
+            name="buy_shop_item",
+            arguments={"shop_index": "1"},
+            reason="Buy the second item",
+        )
+        self.assertEqual(action.arguments["shop_index"], 1)
+
+        runner = BalatroAgentRunner.__new__(BalatroAgentRunner)
+        runner.bridge = AsyncMock()
+        runner.bridge.buy_card.return_value = True
+        import asyncio
+        self.assertTrue(asyncio.run(runner._execute_tool_action(action)))
+        runner.bridge.buy_card.assert_awaited_once_with(1)
 
     def test_discard_blocked_when_zero_discards_left(self) -> None:
         """When discards_left == 0, discard_cards must be excluded from tool definitions."""

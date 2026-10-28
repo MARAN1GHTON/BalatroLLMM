@@ -1,7 +1,10 @@
 """JSON Schema Tool / Function Calling definitions for LLMs to control Balatro."""
 
+import logging
 from dataclasses import dataclass
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 # OpenAI & OpenRouter compatible tool specifications
 BALATRO_TOOLS = [
@@ -566,3 +569,17 @@ class ToolCallAction:
     completion_tokens: int = 0
     total_tokens: int = 0
     calculation_turns: int = 0
+
+    def __post_init__(self) -> None:
+        """Normalize numeric tool arguments across OpenAI-compatible providers."""
+        if "shop_index" not in self.arguments:
+            return
+        raw_index = self.arguments["shop_index"]
+        try:
+            index = int(raw_index)
+        except (TypeError, ValueError):
+            logger.warning("Invalid shop_index %r; using default index 0", raw_index)
+            index = 0
+        if index != raw_index:
+            logger.info("Normalized shop_index from %r to %d", raw_index, index)
+        self.arguments["shop_index"] = index
