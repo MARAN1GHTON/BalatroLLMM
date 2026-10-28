@@ -894,6 +894,18 @@ function BalatroBridge.get_game_state()
         })
     end
 
+    -- Exact base targets for distant milestones, including Endless. Use the
+    -- game's own scaling function so stake/deck/challenge modifiers are retained.
+    -- A boss blind may multiply its base; never substitute a guessed fallback.
+    local ante_targets = {}
+    if get_blind_amount then
+        for _, milestone_ante in ipairs({8, 12, 16}) do
+            ante_targets[tostring(milestone_ante)] = math.floor(
+                get_blind_amount(milestone_ante) * sched_scaling
+            )
+        end
+    end
+
     local deck_name = (G.GAME.selected_back and G.GAME.selected_back.name) or "Red Deck"
     local stake_names = {"White Stake", "Red Stake", "Green Stake", "Black Stake", "Blue Stake", "Purple Stake", "Orange Stake", "Gold Stake"}
     local stake = (G.GAME.stake and stake_names[G.GAME.stake]) or "White Stake"
@@ -1032,7 +1044,7 @@ function BalatroBridge.get_game_state()
     end
 
     return {
-        bridge_version = "v1.9.15",
+        bridge_version = "v1.9.16",
         stage = stage,
         can_reroll_boss = can_reroll_boss,
         ante = G.GAME.round_resets and G.GAME.round_resets.ante or 1,
@@ -1059,6 +1071,7 @@ function BalatroBridge.get_game_state()
             defeated = (G.GAME.chips or 0) >= blind_chips
         },
         ante_blinds = ante_blinds,
+        ante_targets = ante_targets,
         hand = hand_cards,
         jokers = jokers,
         consumables = consumables,

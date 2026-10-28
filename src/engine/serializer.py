@@ -915,8 +915,7 @@ def get_shop_recommendations_for_balance(state: GameState) -> list[str]:
                     boss_target = b.chips
                     break
         if boss_target <= 0:
-            base_ante_targets = {1: 600, 2: 1500, 3: 4000, 4: 10000, 5: 20000, 6: 35000, 7: 60000, 8: 100000}
-            boss_target = base_ante_targets.get(state.ante, 10000)
+            boss_target = get_estimated_boss_target(state) or 0
 
         dollars = state.dollars
         eff_cap = state.interest_cap if getattr(state, "interest_cap", None) else 25
@@ -927,13 +926,14 @@ def get_shop_recommendations_for_balance(state: GameState) -> list[str]:
         xmult_count = len(xmult_jokers)
         mult_status = f"{xmult_count} active ({', '.join(j.label for j in xmult_jokers)})" if xmult_count > 0 else "0 xMult Jokers (Pure additive/flat build)"
 
+        boss_target_label = f"{boss_target:,} chips" if boss_target > 0 else "unknown — update bridge"
         telemetry_lines = [
-            f"> 📊 **SHOP SCALING TELEMETRY (Ante {state.ante} | Boss Target: {boss_target:,} chips)**:",
+            f"> 📊 **SHOP SCALING TELEMETRY (Ante {state.ante} | Boss Target: {boss_target_label})**:",
             f"> • **Joker Structure**: {len(chip_jokers)} Chips, {len(flat_mult_jokers)} +Mult, {mult_status}.",
             f"> • **Capital & Interest**: Bank: **${dollars}** | Interest: **+${interest_per_round}/round** "
             f"({'At $' + str(eff_cap) + ' cap (+$5/rnd max)' if gap_to_interest_cap == 0 else f'${gap_to_interest_cap} to ${eff_cap} cap for max +$5/round'}).",
             f"> • **Scaling Dynamic**: Additive bonuses (Planets & flat +Mult) grow linearly (+15-20 chips / +2-3 mult per card). "
-            f"Exponential boss scaling ({boss_target:,} chips) relies on multiplicative xMult and re-triggers."
+            f"Exponential boss scaling ({boss_target_label}) relies on multiplicative xMult and re-triggers."
         ]
 
         # Highlight multipliers (xMult) in shop
@@ -1020,6 +1020,30 @@ def get_primary_hand_type(state: GameState) -> str:
     return "Two Pair"
 
 
+def get_ante_base_target(state: GameState, ante: int) -> int | None:
+    """Return the bridge-reported base target, never a made-up Endless fallback."""
+    target = (state.ante_targets or {}).get(ante, 0)
+    return target if target > 0 else None
+
+
+def get_estimated_boss_target(state: GameState) -> int | None:
+    """Legacy-only estimate for ordinary Antes; Endless has no safe hardcoded value."""
+    if state.ante > 8:
+        return get_ante_base_target(state, state.ante)
+    # This table is only a fallback for old bridges. The live schedule above it
+    # remains authoritative and includes each boss's actual multiplier.
+    return {
+        1: 600,
+        2: 1500,
+        3: 4000,
+        4: 5000,
+        5: 15000,
+        6: 30000,
+        7: 60000,
+        8: 100000,
+    }.get(state.ante)
+
+
 def get_upcoming_blind_target(state: GameState) -> tuple[str, int]:
     """Finds the name and target chip count of the next upcoming blind."""
     if state.ante_blinds:
@@ -1029,9 +1053,10 @@ def get_upcoming_blind_target(state: GameState) -> tuple[str, int]:
     if state.blind and state.blind.upcoming_boss_name:
         bn = (state.blind.name or "").lower()
         if "big" in bn or "большой" in bn:
-            base_ante_targets = {1: 600, 2: 1500, 3: 4000, 4: 5000, 5: 15000, 6: 30000, 7: 60000, 8: 100000}
-            return state.blind.upcoming_boss_name, base_ante_targets.get(state.ante, 5000)
-    return "Next Blind", (state.target_score or 3000)
+            boss_target = get_estimated_boss_target(state)
+            if boss_target is not None:
+                return state.blind.upcoming_boss_name, boss_target
+    return "Next Blind", (state.target_score or 0)
 
 
 def get_boss_eval_state(state: GameState) -> tuple[GameState, str, int]:
@@ -1053,8 +1078,7 @@ def get_boss_eval_state(state: GameState) -> tuple[GameState, str, int]:
         boss_name = state.blind.upcoming_boss_name
         boss_debuff = state.blind.upcoming_boss_debuff
     if boss_chips <= 0:
-        base_ante_targets = {1: 600, 2: 1500, 3: 4000, 4: 5000, 5: 15000, 6: 30000, 7: 60000, 8: 100000}
-        boss_chips = base_ante_targets.get(state.ante, 5000)
+        boss_chips = get_estimated_boss_target(state) or 0
     if not boss_name:
         return state, "Boss Blind", boss_chips
     sim_blind = state.blind.model_copy(
@@ -1104,7 +1128,13 @@ def project_shop_joker_impact(
         ratio = new_score / curr_score
         hands_new = math.ceil(target_chips / max(1, new_score))
 
-        target_note = f"🎯 [ONE-SHOTS {next_blind_name}!]" if new_score >= target_chips else f"Cuts hands needed from {hands_curr} to {hands_new}"
+        target_note = (
+            f"🎯 [ONE-SHOTS {next_blind_name}!]"
+            if target_chips > 0 and new_score >= target_chips
+            else f"Cuts hands needed from {hands_curr} to {hands_new}"
+            if target_chips > 0
+            else "Next target unknown — update bridge"
+        )
         sign = "+" if delta >= 0 else ""
         return (
             f"  └─ 📈 **IMPACT ON '{primary_hand}'**: ~{curr_score:,} -> **~{new_score:,} score** "
@@ -1196,10 +1226,9 @@ def project_planet_impact(
     if not boss_name and state.blind and state.blind.upcoming_boss_name:
         boss_name = state.blind.upcoming_boss_name
     if boss_chips <= 0:
-        base_ante_targets = {1: 600, 2: 1500, 3: 4000, 4: 5000, 5: 15000, 6: 30000, 7: 60000, 8: 100000}
-        boss_chips = base_ante_targets.get(state.ante, 5000)
+        boss_chips = get_estimated_boss_target(state) or 0
 
-    if boss_name and ("needle" in boss_name.lower() or "игла" in boss_name.lower()):
+    if boss_chips > 0 and boss_name and ("needle" in boss_name.lower() or "игла" in boss_name.lower()):
         if curr_res.score < boss_chips and new_res.score >= boss_chips:
             extra_note = f" — 🎯 **ONE-SHOTS THE NEEDLE BOSS!** (Reaches ~{new_res.score:,} vs {boss_chips:,} target in 1 hand)"
         elif curr_res.score < boss_chips:
@@ -1232,8 +1261,10 @@ def get_boss_readiness_alert(state: GameState, primary_hand: str, primary_hand_s
         return alerts
 
     if boss_chips <= 0:
-        base_ante_targets = {1: 600, 2: 1500, 3: 4000, 4: 5000, 5: 15000, 6: 30000, 7: 60000, 8: 100000}
-        boss_chips = base_ante_targets.get(state.ante, 5000)
+        boss_chips = get_estimated_boss_target(state) or 0
+
+    if boss_chips <= 0:
+        return alerts
 
     n = boss_name.lower()
     is_needle = "needle" in n or "игла" in n
@@ -1779,6 +1810,20 @@ def serialize_game_state_to_markdown(
             f"- **Required Combat Pace**: **~{req_pace:,} chips/hand** across {state.hands_left} remaining hands to clear this blind"
         )
 
+    # Long-horizon facts prevent a comfortable Ante 8 build from looking like
+    # an Endless-ready build. These are exact base blind targets from the game,
+    # not purchase advice or a prediction that the current build will scale.
+    runway_parts: list[str] = []
+    for milestone_ante in (8, 12, 16):
+        target = get_ante_base_target(state, milestone_ante)
+        value = f"**{target:,}**" if target is not None else "**unknown — update bridge**"
+        runway_parts.append(f"Ante {milestone_ante}: {value}")
+    lines.append(
+        "- **📈 ANTE RUNWAY — BASE BLIND TARGETS (before each blind/boss multiplier)**: "
+        + " | ".join(runway_parts)
+        + ". Endless keeps scaling after Ante 8."
+    )
+
     # 1b. Benchmark Metric: Best Hand Record vs Boss Blind Target
     boss_name = ""
     boss_chips = 0
@@ -1794,8 +1839,7 @@ def serialize_game_state_to_markdown(
     if not boss_name and state.blind.upcoming_boss_name:
         boss_name = state.blind.upcoming_boss_name
     if boss_chips <= 0:
-        base_ante_targets = {1: 600, 2: 1500, 3: 4000, 4: 5000, 5: 15000, 6: 30000, 7: 60000, 8: 100000}
-        boss_chips = base_ante_targets.get(state.ante, 5000)
+        boss_chips = get_estimated_boss_target(state) or 0
 
     if max_hand_score > 0 and boss_chips > 0 and state.stage in ("SHOP", "BLIND_SELECT"):
         cov_pct = (max_hand_score / boss_chips) * 100
@@ -1849,9 +1893,15 @@ def serialize_game_state_to_markdown(
                 f"\n> ⚠️ **PEAK PROVENANCE**: Peak set with **{missing_str}** (no longer active) — "
                 f"current build may score differently; re-run `simulate_hand` before relying on the peak."
             )
-        lines.append(
-            f"- **Boss Benchmark**: Run Peak Hand: **{max_hand_score:,} chips**{desc_str} vs Boss Target: **{boss_chips:,} chips** ({cov_pct:.1f}% coverage){provenance_note}"
-        )
+        if boss_chips > 0:
+            lines.append(
+                f"- **Boss Benchmark**: Run Peak Hand: **{max_hand_score:,} chips**{desc_str} vs Boss Target: **{boss_chips:,} chips** ({cov_pct:.1f}% coverage){provenance_note}"
+            )
+        else:
+            lines.append(
+                f"- **Boss Benchmark**: Run Peak Hand: **{max_hand_score:,} chips**{desc_str}; "
+                "exact target unknown (update bridge). Do not infer readiness from a guessed target."
+            )
 
     # 1c. Macro-Strategic Scratchpad (placed AFTER objective facts & Reality Check to prevent self-anchoring bias)
     if scratchpad:
@@ -1859,7 +1909,8 @@ def serialize_game_state_to_markdown(
             lines.append(
                 f"\n#### 📝 YOUR PREVIOUS ANTE NOTE (⚠️ WROTE IN ANTE {scratchpad_ante} — AUDIT AGAINST ANTE {state.ante} FACTS ABOVE!):\n"
                 f"> *Saved Hypothesis (Ante {scratchpad_ante})*: \"{scratchpad}\"\n"
-                f"> 🚨 **STALE PLAN WARNING**: Blind scaling has jumped in Ante {state.ante} (Boss target: **{boss_chips:,} chips**). "
+                f"> 🚨 **STALE PLAN WARNING**: Blind scaling has jumped in Ante {state.ante} "
+                f"(Boss target: **{f'{boss_chips:,} chips' if boss_chips > 0 else 'unknown — update bridge'}**). "
                 f"Do NOT blindly follow this old note if your damage or Jokers have changed — update `plan_notes` in Shop/Blind Select!"
             )
         else:
@@ -2456,14 +2507,19 @@ def serialize_game_state_to_markdown(
             hands_count = state.hands_left if state.hands_left > 0 else 4
             max_round_pot = base_primary_res.score * hands_count
             deficit_pot = target_chips - max_round_pot
-            if deficit_pot > 0:
-                pot_str = f" | ⚠️ Max Round Ceiling ({hands_count} hands): **~{max_round_pot:,} chips** (-{deficit_pot:,} deficit vs {target_chips:,})"
+            if target_chips <= 0:
+                pot_str = " | Exact next target unknown — update bridge; no readiness claim"
+                target_label = "unknown"
             else:
-                pot_str = f" | Max Round Potential ({hands_count} hands): **~{max_round_pot:,} chips** (sufficient)"
+                target_label = f"{target_chips:,} chips"
+                if deficit_pot > 0:
+                    pot_str = f" | ⚠️ Max Round Ceiling ({hands_count} hands): **~{max_round_pot:,} chips** (-{deficit_pot:,} deficit vs {target_chips:,})"
+                else:
+                    pot_str = f" | Max Round Potential ({hands_count} hands): **~{max_round_pot:,} chips** (sufficient)"
 
             lines.append(
                 f"> 📊 **CURRENT BUILD BENCHMARK**: Primary Hand: **{primary_hand}** "
-                f"(~{base_primary_res.score:,} score/hand) | Target to Beat: **{next_blind_name}** ({target_chips:,} chips){pot_str}"
+                f"(~{base_primary_res.score:,} score/hand) | Target to Beat: **{next_blind_name}** ({target_label}){pot_str}"
             )
 
             boss_alerts = get_boss_readiness_alert(state, primary_hand, normal_primary_res.score)

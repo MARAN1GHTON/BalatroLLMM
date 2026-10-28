@@ -337,6 +337,26 @@ class GameState(BaseModel):
     ante_blinds: list[AnteBlindScheduleModel] = Field(
         default_factory=list, description="Full schedule of blinds for current Ante (Small, Big, Boss)"
     )
+    ante_targets: dict[int, int] = Field(
+        default_factory=dict,
+        description="Exact base blind targets for milestone Antes (8, 12, 16), including run scaling; empty on older bridges",
+    )
+
+    @field_validator("ante_targets", mode="before")
+    @classmethod
+    def coerce_ante_targets(cls, v: Any) -> dict[int, int]:
+        if not isinstance(v, dict):
+            return {}
+        targets: dict[int, int] = {}
+        for raw_ante, raw_target in v.items():
+            try:
+                ante, target = int(float(raw_ante)), int(float(raw_target))
+                if ante > 0 and target > 0:
+                    targets[ante] = target
+            except (ValueError, TypeError, OverflowError):
+                continue
+        return targets
+
     hand: list[CardModel] = Field(default_factory=list, description="Cards currently in player's hand")
     jokers: list[JokerModel] = Field(default_factory=list, description="Currently owned Jokers")
     consumables: list[ConsumableModel] = Field(default_factory=list, description="Owned consumables")
