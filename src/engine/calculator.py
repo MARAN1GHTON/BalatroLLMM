@@ -19,6 +19,7 @@ from typing import Any, Sequence
 from ..bridge.schema import CardModel, GameState, JokerModel, PokerHandModel, ShopItemModel
 from ..bridge.client import normalize_id_list
 from .scoring import BalatroScoringEngine, POKER_HAND_BASE, PLANET_HAND_UPGRADES
+from .tools import normalize_shop_index
 from .vouchers import find_voucher_data, format_voucher_impact
 
 # Map planet names to poker hand types
@@ -505,6 +506,7 @@ def execute_simulate_shop_buy(
 
     (and optionally selling an existing Joker to free up slot or raise funds).
     """
+    shop_index = normalize_shop_index(shop_index)
     if not state or state.stage != "SHOP":
         if not (state and state.shop and state.shop.items):
             return "Error: Not currently in the Shop phase."

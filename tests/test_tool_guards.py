@@ -12,7 +12,8 @@ from unittest.mock import AsyncMock
 
 from src.agent.runner import BalatroAgentRunner
 from src.bridge.client import normalize_id_list
-from src.bridge.schema import GameState
+from src.bridge.schema import GameState, ShopItemModel, ShopModel
+from src.engine.calculator import execute_calculation_tool
 from src.engine.tools import ToolCallAction, get_available_tools
 
 
@@ -57,6 +58,25 @@ class TestToolGuardrails(unittest.TestCase):
         import asyncio
         self.assertTrue(asyncio.run(runner._execute_tool_action(action)))
         runner.bridge.buy_card.assert_awaited_once_with(1)
+
+    def test_string_shop_index_is_normalized_for_shop_simulation(self) -> None:
+        """Calculation calls bypass ToolCallAction and need the same coercion."""
+        state = GameState(
+            stage="SHOP",
+            dollars=14,
+            shop=ShopModel(items=[
+                ShopItemModel(index=0, id="item_0", label="The Hermit", item_type="Tarot", cost=3),
+                ShopItemModel(index=1, id="item_1", label="Ramen", item_type="Joker", cost=6),
+            ]),
+        )
+        result = execute_calculation_tool(
+            "simulate_shop_buy",
+            {"reason": "Check Ramen impact", "shop_index": "1"},
+            state=state,
+        )
+        self.assertIn("SHOP PURCHASE SIMULATION", result)
+        self.assertIn("Ramen", result)
+        self.assertNotIn("not supported between instances", result)
 
     def test_discard_blocked_when_zero_discards_left(self) -> None:
         """When discards_left == 0, discard_cards must be excluded from tool definitions."""

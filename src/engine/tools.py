@@ -557,6 +557,18 @@ def get_available_tools(
     return [t for t in tools if t.get("function", {}).get("name") not in disallowed_names]
 
 
+def normalize_shop_index(raw_index: Any) -> int:
+    """Coerce provider-emitted numeric strings to the schema's integer type."""
+    try:
+        index = int(raw_index)
+    except (TypeError, ValueError):
+        logger.warning("Invalid shop_index %r; using default index 0", raw_index)
+        return 0
+    if index != raw_index:
+        logger.info("Normalized shop_index from %r to %d", raw_index, index)
+    return index
+
+
 @dataclass
 class ToolCallAction:
     """Represents a validated tool execution instruction parsed from an LLM response."""
@@ -574,12 +586,4 @@ class ToolCallAction:
         """Normalize numeric tool arguments across OpenAI-compatible providers."""
         if "shop_index" not in self.arguments:
             return
-        raw_index = self.arguments["shop_index"]
-        try:
-            index = int(raw_index)
-        except (TypeError, ValueError):
-            logger.warning("Invalid shop_index %r; using default index 0", raw_index)
-            index = 0
-        if index != raw_index:
-            logger.info("Normalized shop_index from %r to %d", raw_index, index)
-        self.arguments["shop_index"] = index
+        self.arguments["shop_index"] = normalize_shop_index(self.arguments["shop_index"])
